@@ -29,16 +29,15 @@ class BinFile:
     wspace = b'\0\t\n\f\r '
     delims = b'()<>[]{}/%'
     
-    def __init__(self, filepath, blk_sz=io.DEFAULT_BUFFER_SIZE):
+    def __init__(self, filepath, f, blk_sz=io.DEFAULT_BUFFER_SIZE):
         self.filepath = filepath
-        self.f = open(filepath, 'rb')
+        self.f = f
         self.blk_sz = blk_sz
-        self.i = -1
-        # Each block gets read into this buffer
-        self.buf = b''
-        self.buf_sz = 0
-        # Peeking one byte might require looking ahead into a next block
-        self.next_buf = b''
+        
+        self.buf = b''  # normal
+        self.i = 0
+        self.peek_ahead = False
+        self.next_buf = b''  # when peek_ahead is True, use this for peek
 
     def close(self):
         self.f.close()
@@ -47,42 +46,65 @@ class BinFile:
     # next_byte
     #---------------------------------------------------------------------------
     
-    def next_byte(self):
-        """Get the next character from the file (including EOL's)."""
-        self.i += 1
-        if self.i == self.buf_sz:
-            # Did we peek into the next block ?
-            if self.next_buf:
-                # self.buf has already been populated
-                self.next_buf = b''
-            else:
-                self.buf = self.f.read(self.blk_sz)
-            # Have we reached end-of-file ?
-            if not self.buf:
-                return -1
+    def next_byte(self, n=1):
+        """Get the next character from the file. Pop and push buffers as needed."""
+        s = bytearray(b'')
+        for k in range(n):
+            # Have we reached the end of the current buffer (stack top) ?
+            if self.i == len(self.buf):
+                # if peek_ahead is True, get next_buf, otherwise read a new one
+                if self.peek_ahead == True:
+                    self.buf = self.next_buf
+                    self.peek_ahead = False
+                    self.next_buf = b''
+                else:
+                    self.buf = self.f.read(self.blk_sz)
+                    if not self.buf:
+                        return -1                
 
-            self.buf_sz = len(self.buf)
-            self.i = 0
-        return self.buf[self.i]
+                # Reset the index
+                self.i = 0
+            s.append(self.buf[self.i])
+            self.i += 1
+        if n == 1:
+            return s[0]
+        return s
         
     #---------------------------------------------------------------------------
     # peek_byte
     #---------------------------------------------------------------------------
     
-    def peek_byte(self):
-        """Have a peek at the next character from the file (including EOL's)."""
-        j = self.i + 1
-        if j == self.buf_sz:
-            # Current buffer has been handled entirely, I don't need it anymore
-            self.buf = self.next_buf = self.f.read(self.blk_sz)
+    def peek_byte(self, n=1):
+        """Have a peek at the next character(s) from the file.
 
-            # Have we reached end-of-file ?
-            if not self.buf:
-                return -1
+        Push a new buffer if needed, but never pop any buffer, next_byte()
+        still needs them.
+"""
+        # peek() always starts out from the next() state
+        peek_buf = self.buf
+        j = self.i
+        
+        s = bytearray(b'')
+        for k in range(n):
+            if j == len(peek_buf):
+                # self.buf has been exhausted by peek, need to move to the next
+                # block, do I have it already ?
+                if not self.peek_ahead:
+                    # Read and push a new block
+                    self.next_buf = self.f.read(self.blk_sz)
+                    if not self.next_buf:
+                        return -1
+                    self.peek_ahead = True
+                peek_buf = self.next_buf
 
-            # Don't change buf_sz here, we need the current value
-            j = 0
-        return self.buf[j]
+                # Reset the index
+                j = 0
+            # I should be getting chars from next_buf now
+            s.append(peek_buf[j])
+            j += 1
+        if n == 1:
+            return s[0]
+        return s
     
 #-------------------------------------------------------------------------------
 # main

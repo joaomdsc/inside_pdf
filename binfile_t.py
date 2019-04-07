@@ -29,168 +29,282 @@ class BinFileTest(unittest.TestCase):
 
     path = r'D:\joao\src\py\pdf\t'
 
-    # This is stupid. With binary files, CR and LF are not treated specially.
-    
     def test01(self):
-        """Test next_byte() and peek_byte() with dos-style line endings"""
-        # Lines are not empty
-        bf = binfile.BinFile(os.path.join(BinFileTest.path, 't01_dos_crlf.pdf'))
+        """Test simple next_byte() calls, up to and across the block boundary."""
+        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        with open(filepath, 'rb') as f:
+            bf = binfile.BinFile(filepath, f, blk_sz=16)
+        
+            cc = bf.next_byte()
+            self.assertEqual(ord('0'), cc)
+            cc = bf.next_byte()
+            self.assertEqual(ord('1'), cc)
+            cc = bf.next_byte()
+            self.assertEqual(ord('2'), cc)
 
-        # Read the entire first line, plus a couple of characters in the next
-        # one, checking both next_byte() and peek_byte().
-        cc = bf.next_byte()
-        self.assertEqual(ord('y'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('a'), cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(ord('a'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('z'), cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(ord('z'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('b'), cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(ord('b'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(0x0d, cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(0x0d, cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(0x0a, cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(0x0a, cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('6'), cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(ord('6'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('7'), cc2)
-        
-        bf.close()
-    
+            # read up to and including the 'd'
+            for k in range(11): cc = bf.next_byte()
+
+            cc = bf.next_byte()
+            self.assertEqual(ord('e'), cc)
+            cc = bf.next_byte()
+            self.assertEqual(ord('f'), cc)
+            cc = bf.next_byte()
+            self.assertEqual(ord('g'), cc)  # crossed the block border
+            cc = bf.next_byte()
+            self.assertEqual(ord('h'), cc)
+
     def test02(self):
-        """Test next_byte() and peek_byte() with mac-style line endings"""
-        # Lines are not empty
-        bf = binfile.BinFile(os.path.join(BinFileTest.path, 't01_mac_cr.pdf'))
+        """Test next_byte(3) calls, up to and across the block boundary."""
+        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        with open(filepath, 'rb') as f:
+            bf = binfile.BinFile(filepath, f, blk_sz=16)
+        
+            s = bf.next_byte(3)
+            self.assertEqual(b'012', s)
+            s = bf.next_byte(3)
+            self.assertEqual(b'345', s)
+            s = bf.next_byte(9)
+            self.assertEqual(b'6789abcde', s)
+            s = bf.next_byte(4)
+            self.assertEqual(b'fghi', s)  # crossed the block border
+            s = bf.next_byte(3)
+            self.assertEqual(b'jkl', s)
 
-        # Read the entire first line, plus a couple of characters in the next
-        # one, checking both next_byte() and peek_byte().
-        cc = bf.next_byte()
-        self.assertEqual(ord('r'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('e'), cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(ord('e'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('s'), cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(ord('s'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('f'), cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(ord('f'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(0x0d, cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(0x0d, cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('3'), cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(ord('3'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('9'), cc2)
-        
-        bf.close()
-    
     def test03(self):
-        """Test next_byte() and peek_byte() with unix-style line endings"""
-        # Lines are not empty
-        bf = binfile.BinFile(os.path.join(BinFileTest.path, 't01_unix_lf.pdf'))
+        """Test only peek() within the first block."""
+        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        with open(filepath, 'rb') as f:
+            bf = binfile.BinFile(filepath, f, blk_sz=16)
 
-        # Read the entire first line, plus a couple of characters in the next
-        # one, checking both next_byte() and peek_byte().
-        cc = bf.next_byte()
-        self.assertEqual(ord('a'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('b'), cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(ord('b'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('c'), cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(ord('c'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('d'), cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(ord('d'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(0x0a, cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(0x0a, cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('p'), cc2)
-        
-        cc = bf.next_byte()
-        self.assertEqual(ord('p'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('p'), cc2)
-        
-        bf.close()
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('0'), cc2)
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('0'), cc2)
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('0'), cc2)
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('0'), cc2)
+
+            s = bf.peek_byte(3)
+            self.assertEqual(b'012', s)
+            s = bf.peek_byte(3)
+            self.assertEqual(b'012', s)
+            s = bf.peek_byte(3)
+            self.assertEqual(b'012', s)
 
     def test04(self):
-        """Test next_byte() and peek_byte() with a small buffer size"""
+        """Test peek() up to 15 caracters (mustn't exceed block size)."""
         filepath = os.path.join(BinFileTest.path, 'sample.txt')
-        bf = binfile.BinFile(filepath, blk_sz=16)
-        
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('0'), cc2)
+        with open(filepath, 'rb') as f:
+            bf = binfile.BinFile(filepath, f, blk_sz=16)
 
-        cc = bf.next_byte()
-        self.assertEqual(ord('0'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('1'), cc2)
+            s = bf.peek_byte(3)
+            self.assertEqual(b'012', s)
+            s = bf.peek_byte(6)
+            self.assertEqual(b'012345', s)
+            s = bf.peek_byte(9)
+            self.assertEqual(b'012345678', s)
+            s = bf.peek_byte(12)
+            self.assertEqual(b'0123456789ab', s)
+            s = bf.peek_byte(15)
+            self.assertEqual(b'0123456789abcde', s)
 
-        for i in range(13): cc = bf.next_byte()
+    def test05(self):
+        """Peek() first, then next(), mix them up."""
+        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        with open(filepath, 'rb') as f:
+            bf = binfile.BinFile(filepath, f, blk_sz=16)
+        
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('0'), cc2)
 
-        # Next byte has index 14
-        cc = bf.next_byte()
-        self.assertEqual(ord('e'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('f'), cc2)
- 
-        cc = bf.next_byte()
-        self.assertEqual(ord('f'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('g'), cc2)
- 
-        cc = bf.next_byte()
-        self.assertEqual(ord('g'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('h'), cc2)
- 
-        cc = bf.next_byte()
-        self.assertEqual(ord('h'), cc)
-        cc2 = bf.peek_byte()
-        self.assertEqual(ord('i'), cc2)
+            cc = bf.next_byte()
+            self.assertEqual(ord('0'), cc)
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('1'), cc2)
+
+            for i in range(13): cc = bf.next_byte()
+
+            # Next byte has index 14
+            cc = bf.next_byte()
+            self.assertEqual(ord('e'), cc)
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('f'), cc2)
+
+            cc = bf.next_byte()
+            self.assertEqual(ord('f'), cc)
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('g'), cc2)
+
+            cc = bf.next_byte()
+            self.assertEqual(ord('g'), cc)
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('h'), cc2)
+
+            cc = bf.next_byte()
+            self.assertEqual(ord('h'), cc)
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('i'), cc2)
         
-        bf.close()
+    def test06(self):
+        """Test next_byte(3) and peek_byte(3) with a small buffer size"""
+        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        with open(filepath, 'rb') as f:
+            bf = binfile.BinFile(filepath, f, blk_sz=16)
         
+            cc = bf.next_byte()
+            self.assertEqual(ord('0'), cc)
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('1'), cc2)
+            cc = bf.next_byte()
+            self.assertEqual(ord('1'), cc)
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('2'), cc2)
+
+            for i in range(12): cc = bf.next_byte()
+
+            # Next byte has index 14
+            cc = bf.next_byte()
+            self.assertEqual(ord('e'), cc)
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('f'), cc2)
+
+            cc = bf.next_byte()
+            self.assertEqual(ord('f'), cc)
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('g'), cc2)
+
+            cc = bf.next_byte()
+            self.assertEqual(ord('g'), cc)
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('h'), cc2)
+
+            cc = bf.next_byte()
+            self.assertEqual(ord('h'), cc)
+            cc2 = bf.peek_byte()
+            self.assertEqual(ord('i'), cc2)
+            
+    def test07(self):
+        """Test next_byte(3) and peek_byte(3) with a small buffer size"""
+        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        with open(filepath, 'rb') as f:
+            bf = binfile.BinFile(filepath, f, blk_sz=16)
+
+            # Peek before getting any byte
+            cc = bf.peek_byte(1)
+            self.assertEqual(ord('0'), cc)        
+            cc = bf.peek_byte(1)
+            self.assertEqual(ord('0'), cc)        
+            s = bf.peek_byte(2)
+            self.assertEqual(b'01', s)
+            s = bf.peek_byte(3)
+            self.assertEqual(b'012', s)
+            cc = bf.peek_byte(1)
+            self.assertEqual(ord('0'), cc)        
+
+            # Get the first byte then peek
+            cc = bf.next_byte(1)
+            self.assertEqual(ord('0'), cc)
+        
+            cc = bf.peek_byte(1)
+            self.assertEqual(ord('1'), cc)
+            s = bf.peek_byte(2)
+            self.assertEqual(b'12', s)
+            s = bf.peek_byte(3)
+            self.assertEqual(b'123', s)
+
+            # Get 3 bytes, so now we're well into the middle of the buffer
+            s = bf.next_byte(3)
+            self.assertEqual(b'123', s)
+
+            cc = bf.peek_byte(1)
+            self.assertEqual(ord('4'), cc)
+            s = bf.peek_byte(2)
+            self.assertEqual(b'45', s)
+            s = bf.peek_byte(3)
+            self.assertEqual(b'456', s)
+            
+    def test08(self):
+        """Multiple peeks() across the block boundary (by increasing next's)"""
+        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        with open(filepath, 'rb') as f:
+            bf = binfile.BinFile(filepath, f, blk_sz=16)
+            
+            s = bf.next_byte(12)
+            self.assertEqual(b'0123456789ab', s)
+            s = bf.peek_byte(3)
+            self.assertEqual(b'cde', s)  # fully inside the first block
+            
+            cc = bf.next_byte()
+            self.assertEqual(ord('c'), cc)
+            s = bf.peek_byte(3)
+            self.assertEqual(b'def', s)  # on the rightmost boundary of 1st block
+            
+            cc = bf.next_byte()
+            self.assertEqual(ord('d'), cc)
+            s = bf.peek_byte(3)
+            self.assertEqual(b'efg', s)  # across the boundary
+            
+            cc = bf.next_byte()
+            self.assertEqual(ord('e'), cc)
+            s = bf.peek_byte(3)
+            self.assertEqual(b'fgh', s)  # across the boundary
+            
+            cc = bf.next_byte()
+            self.assertEqual(ord('f'), cc)
+            s = bf.peek_byte(3)
+            self.assertEqual(b'ghi', s)  # on the leftmost boundary of 2nd block
+            
+            cc = bf.next_byte()
+            self.assertEqual(ord('g'), cc)
+            s = bf.peek_byte(3)
+            self.assertEqual(b'hij', s)  # fully inside the second block
+            
+            cc = bf.next_byte()
+            self.assertEqual(ord('h'), cc)
+            s = bf.peek_byte(3)
+            self.assertEqual(b'ijk', s)  # fully inside the second block
+             
+    def test09(self):
+        """Multiple peeks() across the block boundary (by increasing peek's)"""
+        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        with open(filepath, 'rb') as f:
+            bf = binfile.BinFile(filepath, f, blk_sz=16)
+            
+            s = bf.next_byte(12)
+            self.assertEqual(b'0123456789ab', s)
+
+            s = bf.peek_byte(3)
+            self.assertEqual(b'cde', s)  # fully inside the first block
+            
+            s = bf.peek_byte(4)
+            self.assertEqual(b'cdef', s)  # on the rightmost boundary of 1st block
+            
+            s = bf.peek_byte(5)
+            self.assertEqual(b'cdefg', s)  # across the boundary
+            
+            s = bf.peek_byte(6)
+            self.assertEqual(b'cdefgh', s)  # across the boundary
+            
+            s = bf.peek_byte(7)
+            self.assertEqual(b'cdefghi', s)  # across the boundary
+           
+    def test10(self):
+        """Block size bigger than the file"""
+        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        with open(filepath, 'rb') as f:
+            bf = binfile.BinFile(filepath, f, blk_sz=64)
+            
+            s = bf.peek_byte(3)
+            self.assertEqual(b'012', s)
+
+            s = bf.next_byte(12)
+            self.assertEqual(b'0123456789ab', s)
+            s = bf.peek_byte(3)
+            self.assertEqual(b'cde', s)  # fully inside the first block
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
 
