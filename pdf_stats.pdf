@@ -1,0 +1,119 @@
+#!/usr/bin/env python
+# pdf_stats.py - print out the pdf versions of every pdf file in a directory
+
+import os
+import re
+import sys
+from file_read_backwards import FileReadBackwards
+import binfile
+
+EOL = '(\r\n|\r|\n)'
+bEOL = b'(\r\n|\r|\n)'
+
+#-------------------------------------------------------------------------------
+# I want stdout to be unbuffered, always
+#-------------------------------------------------------------------------------
+
+class Unbuffered(object):
+    def __init__(self, stream):
+        self.stream = stream
+    def write(self, data):
+        self.stream.write(data)
+        self.stream.flush()
+    def __getattr__(self, attr):
+        return getattr(self.stream, attr)
+
+import sys
+sys.stdout = Unbuffered(sys.stdout)
+                
+#-------------------------------------------------------------------------------
+# get_eol
+#-------------------------------------------------------------------------------
+
+def get_eol(filepath):
+    """Determine the type of line endings in this file."""
+    with open(filepath, 'rb') as f:
+        line = f.readline()
+    m = re.match(rb'%PDF-\d.\d\r\n', line)
+    if m:
+        return 'CRLF'
+    else:
+        m = re.match(rb'%PDF-\d.\d\r', line)
+        if m:
+            return 'CR'
+        else:
+            m = re.match(rb'%PDF-\d.\d\n', line)
+            if m:
+                return 'LF'
+    return ''
+
+#-------------------------------------------------------------------------------
+# get_version
+#-------------------------------------------------------------------------------
+
+def get_version(filepath):
+    """Extract the PDF Specification version number."""
+    with open(filepath, 'rb') as f:
+        line = f.readline()
+            
+        # Adding '$' at the end of the regexp causes it to fail for some
+        # files. It correctly matches files that use the Unix-style line
+        # ending 0a (\n, LF), but fails on files that use Mac-style 0d (\r,
+        # CR) or Windows-style 0d0a (\r\n, CRLF)
+
+        m = re.match(b'^%PDF-([0-9]).([0-9])' + bEOL, line)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        else:
+            return 0, 0
+
+#-------------------------------------------------------------------------------
+# get_trailer - read file from the end, extract trailer dict and xref offset
+#-------------------------------------------------------------------------------
+
+def get_trailer(filepath):
+    """Extract the trailer dictionary and xref offset."""
+    offset = -1
+    trailer = False
+    
+    with FileReadBackwards(filepath) as f:
+        # Last line
+        line = f.readline()
+        m = re.match('%%EOF' + EOL, line)
+        if not m:
+            print('syntax error: no EOF marker')
+
+        # Byte offset of last cross-reference section
+        line = f.readline().rstrip()
+        offset = int(line)
+
+        # startxref
+        line = f.readline()
+        m = re.match('startxref' + EOL, line)
+        if not m:
+            print('syntax error: no startxref')
+
+        # end of trailer dictionary
+        line = f.readline()
+        m = re.search('>>' + EOL, line)
+        if m:
+            trailer = True
+            
+    return trailer, offset 
+               
+#-------------------------------------------------------------------------------
+# main
+#-------------------------------------------------------------------------------
+            
+if __name__ == '__main__':
+    # path = r'C:\Users\joao.moreira.INV\OneDrive - INVIVOO\Books'
+    path = r'C:\u\pdf'
+    print('Filename;Version;EOL;Trailer;Offset')
+    for f in os.listdir(path):
+        if f.endswith('.pdf'):
+            filepath = os.path.join(path, f)
+            eol = get_eol(filepath)
+            major, minor = get_version(filepath)
+            trailer, offset = get_trailer(filepath)
+            print(f'{f};{major}.{minor};{eol:4};{" true" if trailer else "false"}'
+                  + f';{offset:8}')

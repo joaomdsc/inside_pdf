@@ -26,8 +26,6 @@ sys.stdout = Unbuffered(sys.stdout)
 #-------------------------------------------------------------------------------
 
 class BinFile:
-    wspace = b'\0\t\n\f\r '
-    delims = b'()<>[]{}/%'
     
     def __init__(self, filepath, f, blk_sz=io.DEFAULT_BUFFER_SIZE):
         self.filepath = filepath

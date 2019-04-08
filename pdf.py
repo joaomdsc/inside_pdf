@@ -5,7 +5,6 @@ import os
 import re
 import sys
 from enum import Enum, auto, unique
-from file_read_backwards import FileReadBackwards
 import binfile
 
 EOL = '(\r\n|\r|\n)'
@@ -34,10 +33,10 @@ sys.stdout = Unbuffered(sys.stdout)
 # Possible token types in PDF files
 @unique
 class EToken(Enum):
+    PARSE_ERROR = auto()     # pseudo-token describing a parsing error 
+    PARSE_EOF = auto()       # pseudo-token describing the EOF condition
     VERSION_MARKER = auto()  # %PDF-n.m
     EOF_MARKER = auto()      # %%EOF
-    TRUE = auto()            # true
-    FALSE = auto()           # false
     INTEGER = auto()
     REAL = auto()
     # I'm not sure I need to distinguish the next 2 tokens. Maybe just knowing
@@ -49,11 +48,13 @@ class EToken(Enum):
     ARRAY_END = auto()       # ']'
     DICT_BEGIN = auto()      # '<<'
     DICT_END = auto()        # '>>'
-    STREAM_BEGIN = auto()    # '<<'
-    STREAM_END = auto()      # '>>'
+    TRUE = auto()            # true
+    FALSE = auto()           # false
     NULL = auto()            # null
-    OBJECT_BEGIN = auto()    # '<<'
-    OBJECT_END = auto()      # '>>'
+    OBJECT_BEGIN = auto()    # obj
+    OBJECT_END = auto()      # endobj
+    STREAM_BEGIN = auto()    # stream
+    STREAM_END = auto()      # endstream
     OBJ_REF = auto()         # 'R'
     XREF_SECTION = auto()    # xref
     TRAILER = auto()         # trailer
@@ -78,16 +79,37 @@ Tokens are separated from each other by whitespace and/or delimiter characters.
         self.type = type
         self.data = data
 
+    def __str__(self):
+        s = f'{self.type}('
+        if self.type == EToken.VERSION_MARKER:
+            (maj, min) = self.data
+            s += f'{maj}, {min}'
+        elif self.type == EToken.INTEGER or self.type == EToken.REAL:
+            s += str(self.data)
+        elif self.type == EToken.LITERAL_STRING or self.type == EToken.HEX_STRING:
+            # FIXME show character when displayable, \xyyyy otherwise
+            s += self.data[:min(20, len(self.data))].hex()
+        elif self.type == EToken.NAME:
+            s += self.data.decode()
+        elif self.type == EToken.PARSE_ERROR:
+            s += self.data
+        s += ')'
+        return s
+
 #-------------------------------------------------------------------------------
-# class Tokenizer
+# class Tokener
 #-------------------------------------------------------------------------------
 
-class Tokenizer:
-
+class Tokener:
+    # Character classes
+    wspace = b'\0\t\n\f\r '
+    delims = b'()<>[]{}/%'
     hex_digit = b'0123456789abcdefABCDEF'
 
-    def __init__(self, filepath):
-        self.pb = BinFile(filepath)
+    # Initializer
+    def __init__(self, filepath, f):
+        self.bf = binfile.BinFile(filepath, f)
+        self.f = f
         self.parens = 0
         
     #---------------------------------------------------------------------------
@@ -96,10 +118,11 @@ class Tokenizer:
 
     def get_literal_string(self):
         """Found the opening paren, get the entire string."""
-        # The opening parens did not go into ls 
-        ls = b''
+        # The opening parens did not go into ls. We have not yet read the
+        # first character of the literal.
+        ls = bytearray()
         while True:
-            cc = self.pb.next_byte()
+            cc = self.bf.next_byte()
             c = chr(cc)
             if c == ')':
                 self.parens -= 1
@@ -108,47 +131,55 @@ class Tokenizer:
                     # (it does not go into ls)
                     return ls
                 else:
-                    ls += cc
+                    ls.append(cc)
             elif c == '(':
                 self.parens += 1
-                ls += cc
+                ls.append(cc)
             elif c == '\\':
                 # Escape sequences
-                cc2 = self.pb.peek_byte()
+                cc2 = self.bf.peek_byte()
                 c2 = chr(cc2)
                 if c2 == 'n':
-                    ls += ord('\n')
+                    ls.append(ord('\n'))
+                    self.bf.next_char()
                 elif c2 == 'r':
-                    ls += ord('\r')
+                    ls.append(ord('\r'))
+                    self.bf.next_char()
                 elif c2 == 't':
-                    ls += ord('\t')
+                    ls.append(ord('\t'))
+                    self.bf.next_char()
                 elif c2 == 'b':
-                    ls += ord('\b')
+                    ls.append(ord('\b'))
+                    self.bf.next_char()
                 elif c2 == 'f':
-                    ls += ord('\f')
+                    ls.append(ord('\f'))
+                    self.bf.next_char()
                 elif c2 == '(':
-                    ls += ord('(')
+                    ls.append(ord('('))
+                    self.bf.next_char()
                 elif c2 == ')':
-                    ls += ord(')')
+                    ls.append(ord(')'))
+                    self.bf.next_char()
                 elif c2 == '\\':
-                    ls += ord('\\')
+                    ls.append(ord('\\'))
+                    self.bf.next_char()
                 else:
-                    pass
-                    # # peek may fail if there are less than 3 characters in the
-                    # # stream. In that case, the backslash should be ignored,
-                    # # and the following character(s) read.
-                    # oc = self.peek(3)
-                    # try:
-                    #     c = int(oc, 8)
-                    #     self.s += c  # FIXME is this correct ??
-                    #     # FIXME need to consume 3 caracters from the input stream
-                    # except ValueError as e:
-                    #     # Backslash was not followed by one of the expected
-                    #     # characters, just ignore it.
-                    #     pass
+                    # peek may fail if there are less than 3 characters in the
+                    # stream. In that case, the backslash should be ignored,
+                    # and the following character(s) read.
+                    s = self.bf.peek_byte(3)
+                    try:
+                        c = int(s, 8)
+                        ls.append(c)
+                        self.bf.next_char(3)
+                    except ValueError as e:
+                        # Backslash was not followed by one of the expected
+                        # characters, just ignore it. The character following
+                        # the backslash wasn't read.
+                        print(error)
             else:
                 # All other characters just get added to the string
-                ls += cc
+                ls.append(cc)
 
     #---------------------------------------------------------------------------
     # get_hex_string
@@ -161,19 +192,20 @@ class Tokenizer:
         any value between 0 and 255, it's not necessarily ascii.
 """
         
-        # The opening 'less than' did not go into the hex string 'hs' 
-        hs = b''
+        # The opening 'less than' did not go into the hex string 'hs'. We have
+        # not yet read the first character of the hex literal.
+        hs = bytearray()
         while True:
-            cc = self.pb.next_byte()
+            cc = self.bf.next_byte()
             c = chr(cc)
             if c == '>':
                 if len(hs)%2 == 1:
-                    hs += '0'
+                    hs.append(ord('0'))
                 # Each byte represents a hexadecimal digit, coded in ascii. If
                 # I decode it, the resulting string will be suitable for fromhex())
                 return bytes.fromhex(hs.decode())
-            elif cc in Tokenizer.hex_digit:
-                hs += cc
+            elif cc in Tokener.hex_digit:
+                hs.append(cc)
             else:
                 # Incorrect value
                 return None
@@ -184,251 +216,285 @@ class Tokenizer:
 
     def get_name(self):
         """Found the opening '/', now get the rest of the characters."""
-        # cc is the '/'. If there are delimiters or whitespace
-        s = ''
+        # cc is the '/'. We have not yet read the first character of the
+        # name. When this function returns, self.cc holds the next character to
+        # be analyzed.
+        name = bytearray()
         while True:
-            cc = self.pb.next_byte()
-            if cc in Tokenizer.delims or cc in Tokenizer.wspace:
+            cc = self.bf.next_byte()
+            if cc in Tokener.delims or cc in Tokener.wspace:
                 break
             c = chr(cc)
             if c == '#':
                 # FIXME there may not be 2 characters left to read
                 # FIXME handle error case when hc has invalid characters
-                hc = self.pb.next_byte(2)
-                s += bytes.fromhex(hc)
+                s = self.bf.peek_byte(2)
+                if s[0] in Tokener.hex_digit and s[1] in Tokener.hex_digit:
+                    name += bytes.fromhex(s.decode())
+                    self.bf.next_byte(2)
                 continue
             if cc < 33 or cc > 126:
                 # Cf. PDF Spec 1.7 page 17
                 print('error: character should be written using its 2-digit'
                       + ' hexadecimal code, preceded by the NUMBER SIGN only.')
-                return ''
-            s += cc
+                return None
+            name.append(cc)
 
-        return s
+        # Don't move cc forward here. We've stopped on a delim or wspace, this
+        # should be analyzed by the next handler. 
+        self.cc = cc
+        return name
+      
+    #---------------------------------------------------------------------------
+    # get_regular_run
+    #---------------------------------------------------------------------------
+
+    def get_regular_run(self):
+        """cc is a regular character, get the entire run of them."""
+        # self.cc was analyzed by every handler in get_next_token, and not
+        # recognized, so it's a regular character, and we want to accumulate
+        # the entire consecutive run of regular characters.
+        cc = self.cc
+        
+        run = bytearray()
+        while cc not in Tokener.delims and cc not in Tokener.wspace:
+            run.append(cc)
+            cc = self.bf.next_byte()
+        # cc now holds the first character not in 'run', still to be analyzed
             
+        # Am I sure this is ASCII ?
+        s = run.decode()
+        #print(f'get_regular_run: s={s}')
+
+        if s == 'true':
+            t = Token(EToken.TRUE)
+        elif s == 'false':
+            t = Token(EToken.FALSE)
+        elif s == 'null':
+            t = Token(EToken.NULL)
+        elif s == 'obj':
+            t = Token(EToken.OBJECT_BEGIN)
+        elif s == 'endobj':
+            t = Token(EToken.OBJECT_END)
+        elif s == 'stream':
+            t = Token(EToken.STREAM_BEGIN)
+        elif s == 'endstream':
+            t = Token(EToken.STREAM_END)
+        elif s == 'R':
+            t = Token(EToken.OBJ_REF)
+        elif s == 'xref':
+            t = Token(EToken.XREF_SECTION)
+        elif s == 'trailer':
+            t = Token(EToken.TRAILER)
+        elif s == 'startxref':
+            t = Token(EToken.STARTXREF)
+        else:
+            try:
+                # Numeric objects
+                # FIXME match vs. search. This leaves characters in s...
+                m = re.match(r'[+-]?(\d+)', s)
+                if m:
+                    #print(f'm.group(1)={m.group(1)}, s="{s}"')
+                    t = Token(EToken.INTEGER, int(m.group(1)))
+                else:
+                    # FIXME the below regexp is wrong
+                    m = re.match(r'[+-]?([\d.]+)', s)
+                    if m:
+                        t = Token(EToken.REAL, float(s))
+                    else:
+                        self.cc = cc
+                        return Token(EToken.PARSE_ERROR,
+                                     "Unrecognized regular character run.")
+            except ValueError:
+                self.cc = cc
+                return Token(EToken.PARSE_ERROR,
+                             "Invalid string value for numeric parsing.")
+        self.cc = cc
+        return t
+      
     #---------------------------------------------------------------------------
     # next_token
     #---------------------------------------------------------------------------
  
     def get_next_token(self):
         """Get the next token."""
-        # Invariant: I've recognized a token, so cc is either whitespace or a
-        # delimiter character
-        while cc in BinFile.wspace:
-            cc = self.pb.next_byte()
+        # Invariant: cc has been read from the stream, but not yet analyzed. It
+        # is stored (persisted in between calls) in self.cc. This means that
+        # every time control leaves this function (through return), it must
+        # read, but not analyze, the next character, and store it in sefl.cc.
+        cc = self.cc
+
+        # Have we reached EOF ?
+        if cc == -1:
+            return Token(EToken.PARSE_EOF)
+
+        # Start analyzing 
+        while cc in Tokener.wspace:
+            cc = self.bf.next_byte()
             if cc == -1:
-                return -1
+                return Token(EToken.PARSE_EOF)
+            
         # Now cc is either a delimiter or a regular character
         c = chr(cc)
         if c == '(':
             # begin literal string
             self.parens = 1
             ls = self.get_literal_string()
-            t = Token(EToken.LITERAL_STRING, ls)
             # cc is on the closing parens, call next_byte() so that when we
             # return, cc is the next not-yet-analyzed byte.
-            cc = self.pb.next_byte()
-            if cc == -1:
-                # FIXME reached eof, how do I handle this ?
-                # FIXME what about t ?
-                return -1
-            # Now return a Token object
-            return t
+            self.cc = self.bf.next_byte()
+            return Token(EToken.LITERAL_STRING, ls)
         elif c == '<':
-            cc2 = self.pb.peek_byte()
+            cc2 = self.bf.peek_byte()
+            c2 = chr(cc2)
             if cc2 == -1:
                 # There's no byte to peek at
                 # FIXME this is an error situation
                 return -1
-            if cc2 in Tokenizer.hex_digit:
-                # I'll get this hex digit again from next_byte())
+            if cc2 in Tokener.hex_digit:
                 # begin hex string
                 hs = self.get_hex_string()
-                t = Token(EToken.HEX_STRING, hs)
                 # cc is on the closing 'greater than', call next_byte() so that
                 # when we return, cc is the next not-yet-analyzed byte.
-                cc = self.pb.next_byte()
-                if cc == -1:
-                    # FIXME reached eof, how do I handle this ?
-                    # FIXME what about t ?
-                    return -1
-                # Now return a Token object
-                return t
-            elif cc2 == '<':
-                # begin dictionary, next byte is '<' 
-                cc = self.pb.next_byte()
+                self.cc = self.bf.next_byte()
+                return Token(EToken.HEX_STRING, hs)
+            elif c2 == '<':
+                # begin dictionary
+                self.bf.next_byte()  # move input stream forward, past peeked char
+                self.cc = self.bf.next_byte()  # next byte to analyze
                 return Token(EToken.DICT_BEGIN)
             else:
                 # The initial '<' wasn't followed by expected data, this is an
-                # error. This is exactly why I peeked, so the next character is
-                # available for analysis in the normal context.
-                print("error: '<' not followed by a second '<'")
+                # error. 
+                self.cc = self.bf.next_byte()
+                return Token(EToken.PARSE_ERROR,
+                             "error: '<' not followed by hex digit or second '<'")
         elif c == '>':
-            cc2 = self.pb.peek_byte()
+            cc2 = self.bf.peek_byte()
+            c2 = chr(cc2)
             if cc2 == -1:
                 # There's no byte to peek at
                 # FIXME this is an error situation
                 return -1
-            elif cc2 == '>':
+            elif c2 == '>':
                 # end dictionary
-                cc = self.pb.next_byte()
+                self.bf.next_byte()  # read the one I've peeked
+                self.cc = self.bf.next_byte()
                 return Token(EToken.DICT_END)
             else:
                 # The initial '>' wasn't followed by expected data, this is an
-                # error. This is exactly why I peeked, so the next character is
-                # available for analysis in the normal context.
-                print("error: '>' not followed by a second '>'")
+                # error. 
+                self.cc = self.bf.next_byte()
+                return Token(EToken.PARSE_ERROR,
+                             "error: '>' not followed by a second '>'")
         elif c == '/':
             # begin name
-            s = self.get_name()
-            # I've stopped on a delimiter or whitespace
-            # FIXME either next_byte() here, or what ?
+            name = self.get_name()
+            # self.cc is on a delimiter or whitespace, to be analyzed.
+            return Token(EToken.NAME, name)
         elif c == '%':
-            # FIXME recognize special cases %PDF-n.m, %%EOF
+            # begin comment
+            s = self.bf.peek_byte(7)
+            m = re.match(rb'PDF-(\d).(\d)', s)
+            if m:
+                self.bf.next_byte(7)  # move forward over the peeked chars
+                self.cc = self.bf.next_byte()
+                return Token(EToken.VERSION_MARKER,
+                             (int(m.group(1)), int(m.group(2))))
+            s = self.bf.peek_byte(4)
+            if s == b'%EOF':
+                self.bf.next_byte(4)  # move forward over the peeked chars
+                self.cc = self.bf.next_byte()
+                return Token(EToken.EOF_MARKER)
             while True:
-                # next_byte() here mustn't handle end of lines transparently,
+                # FIXME add a token type COMMENT and keep the value
                 # we need to ignore characters up to eol.
-                cc = self.pb.next_byte()
-                if cc == '\r':
-                    cc2 = self.pb.peek_byte()
-                    if cc2 == '\n':
-                        cc = self.pb.next_byte()
-                        # we've found '\r\n', eol
-                    # we've found '\r', eol
-                elif cc = '\n':
-                    # we've found '\r', eol
-                    pass
-        elif cc == '[':
+                cc = self.bf.next_byte()
+                # print(f'%: cc={cc}', end='')
+                # if 32 <= cc <= 126:
+                #     print(f' {chr(cc)}', end='')
+                # print()
+                c2 = chr(cc)
+                if c2 == '\r':
+                    cc2 = self.bf.peek_byte()
+                    c3 = chr(cc2)
+                    if c3 == '\n':
+                        # we've found '\r\n', dos-style eol
+                        self.bf.next_byte()  # move forward over the peeked char
+                        self.cc = self.bf.next_byte()
+                        return Token(EToken.CRLF)
+                    # we've found '\r', mac-style eol
+                    self.cc = self.bf.next_byte()
+                    return Token(EToken.CR)
+                elif c2 == '\n':
+                    # we've found '\n', unix-style eol
+                    self.cc = self.bf.next_byte()
+                    return Token(EToken.LF)
+        elif c == '[':
             state = 'begin_array'
-        elif cc in b')>]}':
-            print('error: unexpected character')
+            self.cc = self.bf.next_byte()
+            return Token(EToken.ARRAY_BEGIN)
+        elif c == ']':
+            state = 'end_array'
+            self.cc = self.bf.next_byte()
+            return Token(EToken.ARRAY_END)
+        elif c == '\r':
+            cc2 = self.bf.peek_byte()
+            c2 = chr(cc2)
+            if c2 == '\n':
+                # we've found '\r\n', dos-style eol
+                self.cc = self.bf.next_byte()
+                return Token(EToken.CRLF)
+            # we've found '\r', mac-style eol
+            self.cc = self.bf.next_byte()
+            return Token(EToken.CR)
+        elif c == '\n':
+            # we've found '\n', unix-style eol
+            self.cc = self.bf.next_byte()
+            return Token(EToken.LF)
+        elif c in ')>}':
+            self.cc = self.bf.next_byte()
+            return Token(EToken.PARSE_ERROR,
+                         "error: unexpected character '{c}'")
         else:
             # Neither whitespace nor delimiter, cc is a regular character.
             # Recognize keywords: true, false, null, obj, endobj, stream,
-            # endstream, R, xref, n, f, trailer, startxref. Here we should just
-            # recognize a run of regular characters.
-            
+            # endstream, R, xref, trailer, startxref.
             # Recognize numbers
+            # Here we should just recognize a run of regular characters.
+            self.cc = cc
+            return self.get_regular_run()
 
-        # Indirect objects are higher-level objects : number number R
-                
-#-------------------------------------------------------------------------------
-# get_eol
-#-------------------------------------------------------------------------------
+def parse_tokens(filepath):
+    # Array for token storage 
+    tokens = []
 
-def get_eol(filepath):
-    """Determine the type of line endings in this file."""
+    # Parse a character stream into a token stream
     with open(filepath, 'rb') as f:
-        line = f.readline()
-    m = re.match(rb'%PDF-\d.\d\r\n', line)
-    if m:
-        return 'CRLF'
-    else:
-        m = re.match(rb'%PDF-\d.\d\r', line)
-        if m:
-            return 'CR'
-        else:
-            m = re.match(rb'%PDF-\d.\d\n', line)
-            if m:
-                return 'LF'
-    return ''
+        tk = Tokener(filepath, f)
+        tk.cc = tk.bf.next_byte()
+        while True:
+            t = tk.get_next_token()
+            if t == -1:
+                print('Reached EOF')
+                break
+            print(t)
+            tokens.append(t)
 
-#-------------------------------------------------------------------------------
-# get_version
-#-------------------------------------------------------------------------------
+    # # Now print out the tokens
+    # for t in tokens:
+    #     print(t)
 
-def get_version(filepath):
-    """Extract the PDF Specification version number."""
-    with open(filepath, 'rb') as f:
-        line = f.readline()
-            
-        # Adding '$' at the end of the regexp causes it to fail for some
-        # files. It correctly matches files that use the Unix-style line
-        # ending 0a (\n, LF), but fails on files that use Mac-style 0d (\r,
-        # CR) or Windows-style 0d0a (\r\n, CRLF)
 
-        m = re.match(b'^%PDF-([0-9]).([0-9])' + bEOL, line)
-        if m:
-            return int(m.group(1)), int(m.group(2))
-        else:
-            return 0, 0
-
-#-------------------------------------------------------------------------------
-# get_trailer - read file from the end, extract trailer dict and xref offset
-#-------------------------------------------------------------------------------
-
-def get_trailer(filepath):
-    """Extract the trailer dictionary and xref offset."""
-    offset = -1
-    trailer = False
-    
-    with FileReadBackwards(filepath) as f:
-        # Last line
-        line = f.readline()
-        m = re.match('%%EOF' + EOL, line)
-        if not m:
-            print('syntax error: no EOF marker')
-
-        # Byte offset of last cross-reference section
-        line = f.readline().rstrip()
-        offset = int(line)
-
-        # startxref
-        line = f.readline()
-        m = re.match('startxref' + EOL, line)
-        if not m:
-            print('syntax error: no startxref')
-
-        # end of trailer dictionary
-        line = f.readline()
-        m = re.search('>>' + EOL, line)
-        if m:
-            trailer = True
-            
-    return trailer, offset 
-
-#-------------------------------------------------------------------------------
-# get_indirect_objects
-#-------------------------------------------------------------------------------
-
-# FIXME need to properly tokenize my parsing algorithm, that's how the spec is
-# done, not by lines.
-
-def get_indirect_objects(filepath):
-    """Extract all the indirect objects from the beginning up to the trailer."""
-    with open(filepath, 'rb') as f:
-        objs = []
-        for line in f:
-            # FIXME I'm using python re's notion of whitespace, not the PDF
-            # specification's.
-            m = re.match(rb'(\d+)\s+(\d+)\s+obj' + bEOL, line)
-            if m:
-                # Start a new object (object number, generation nbr)
-                obj = PdfObj(int(m.group(1).decode()), int(m.group(2).decode()))
-                continue
-            m = re.match(b'endobj' + bEOL, line)
-            if m:
-                # Finish the current object
-                objs.append(obj)
-                
-            m = re.match(b'<<', line)
-            if m:
-                # Finish the current object
-                pass
-               
 #-------------------------------------------------------------------------------
 # main
 #-------------------------------------------------------------------------------
             
 if __name__ == '__main__':
-    # path = r'C:\Users\joao.moreira.INV\OneDrive - INVIVOO\Books'
-    path = r'C:\u\pdf'
-    print('Filename;Version;EOL;Trailer;Offset')
-    for f in os.listdir(path):
-        if f.endswith('.pdf'):
-            filepath = os.path.join(path, f)
-            eol = get_eol(filepath)
-            major, minor = get_version(filepath)
-            trailer, offset = get_trailer(filepath)
-            print(f'{f};{major}.{minor};{eol:4};{" true" if trailer else "false"}'
-                  + f';{offset:8}')
+    # Check cmd line args
+    if len(sys.argv) < 2:
+        print(f'usage: {sys.argv[0]} <filepath>')
+        exit(-1)
+    filepath = sys.argv[1]
+    
+    parse_tokens(filepath)
