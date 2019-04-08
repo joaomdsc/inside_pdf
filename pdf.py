@@ -7,9 +7,6 @@ import sys
 from enum import Enum, auto, unique
 import binfile
 
-EOL = '(\r\n|\r|\n)'
-bEOL = b'(\r\n|\r|\n)'
-
 #-------------------------------------------------------------------------------
 # I want stdout to be unbuffered, always
 #-------------------------------------------------------------------------------
@@ -102,7 +99,8 @@ Tokens are separated from each other by whitespace and/or delimiter characters.
 
 class Tokener:
     # Character classes
-    wspace = b'\0\t\n\f\r '
+    wspace = b'\0\t\f '
+    # wspace = b'\0\t\n\r\f '
     delims = b'()<>[]{}/%'
     hex_digit = b'0123456789abcdefABCDEF'
 
@@ -222,7 +220,7 @@ class Tokener:
         name = bytearray()
         while True:
             cc = self.bf.next_byte()
-            if cc in Tokener.delims or cc in Tokener.wspace:
+            if cc in Tokener.delims or cc in Tokener.wspace or cc in b'\r\n':
                 break
             c = chr(cc)
             if c == '#':
@@ -249,7 +247,7 @@ class Tokener:
     # get_regular_run
     #---------------------------------------------------------------------------
 
-    def get_regular_run(self):
+    def get_regular_run(self, stream_len=None):
         """cc is a regular character, get the entire run of them."""
         # self.cc was analyzed by every handler in get_next_token, and not
         # recognized, so it's a regular character, and we want to accumulate
@@ -257,7 +255,8 @@ class Tokener:
         cc = self.cc
         
         run = bytearray()
-        while cc not in Tokener.delims and cc not in Tokener.wspace:
+        while (cc not in Tokener.delims and cc not in Tokener.wspace and
+                   cc not in b'\r\n'):
             run.append(cc)
             cc = self.bf.next_byte()
         # cc now holds the first character not in 'run', still to be analyzed
@@ -278,6 +277,10 @@ class Tokener:
             t = Token(EToken.OBJECT_END)
         elif s == 'stream':
             t = Token(EToken.STREAM_BEGIN)
+            # PDF Spec, § 7.3.8.1, page 19 :"The keyword stream that follows
+            # the stream dictionary shall be followed by an end-of-line marker
+            # consisting of either a CARRIAGE RETURN and a LINE FEED or just a
+            # LINE FEED, and not by a CARRIAGE RETURN alone."
         elif s == 'endstream':
             t = Token(EToken.STREAM_END)
         elif s == 'R':
@@ -316,8 +319,8 @@ class Tokener:
     # next_token
     #---------------------------------------------------------------------------
  
-    def get_next_token(self):
-        """Get the next token."""
+    def get_next_token(self, stream_len=None):
+        """Get the next token. If stream_len == None, ignore it."""
         # Invariant: cc has been read from the stream, but not yet analyzed. It
         # is stored (persisted in between calls) in self.cc. This means that
         # every time control leaves this function (through return), it must
@@ -333,7 +336,7 @@ class Tokener:
             cc = self.bf.next_byte()
             if cc == -1:
                 return Token(EToken.PARSE_EOF)
-            
+
         # Now cc is either a delimiter or a regular character
         c = chr(cc)
         if c == '(':
@@ -443,6 +446,7 @@ class Tokener:
             c2 = chr(cc2)
             if c2 == '\n':
                 # we've found '\r\n', dos-style eol
+                self.bf.next_byte()  # move forward over the peeked char
                 self.cc = self.bf.next_byte()
                 return Token(EToken.CRLF)
             # we've found '\r', mac-style eol
@@ -463,7 +467,11 @@ class Tokener:
             # Recognize numbers
             # Here we should just recognize a run of regular characters.
             self.cc = cc
-            return self.get_regular_run()
+            return self.get_regular_run(stream_len)
+
+#-------------------------------------------------------------------------------
+# parse_tokens
+#-------------------------------------------------------------------------------
 
 def parse_tokens(filepath):
     # Array for token storage 
@@ -473,13 +481,46 @@ def parse_tokens(filepath):
     with open(filepath, 'rb') as f:
         tk = Tokener(filepath, f)
         tk.cc = tk.bf.next_byte()
+        stream_len = -1
         while True:
-            t = tk.get_next_token()
-            if t == -1:
-                print('Reached EOF')
+            t = tk.get_next_token(stream_len)
+            if t.type == EToken.PARSE_EOF:
                 break
             print(t)
             tokens.append(t)
+            # The definition of stream forces us to start building higher-level
+            # objects before the entire token stream ahs been parsed. The
+            # number of bytes in the stream is declared in the stream
+            # dictionary that *precedes* it. So I need to build dictionaries as
+            # they appear.
+            if t.type == EToken.DICT_BEGIN:
+                while True:
+                    # The dictionary entry's key
+                    t = tk.get_next_token()
+                    if t.type == EToken.DICT_END:
+                        break
+                    if t.type != EToken.NAME:
+                        print('error')
+                        break
+                    print(t)
+                    tokens.append(t)
+                    k = t.data.decode()  # FIXME assuming only ascii
+                    
+                    # The dictionary entry's value
+                    t = tk.get_next_token()
+                    if t.type == EToken.PARSE_EOF:
+                        print('error')
+                        break
+                    print(t)
+                    tokens.append(t)
+
+                    if k == 'Length':
+                        if t.type != EToken.INTEGER:
+                            print('error')
+                            break
+                        stream_len = t.data
+                        break
+                    
 
     # # Now print out the tokens
     # for t in tokens:
@@ -498,3 +539,27 @@ if __name__ == '__main__':
     filepath = sys.argv[1]
     
     parse_tokens(filepath)
+
+    # Notes: the flex_bison.pdf has some unexpected data:
+    #
+    # <</Contents 6624 0 R /CropBox[ 0 0 595.276 841.89]/MediaBox[ 0 0 504 661.44]
+    #
+    # In a dictionary entry, the value may be a indirect reference, i.e. 3
+    # tokens INTEGER, INTEGER, OBJ_REF.
+
+    # The problem with streams is that we need to parse a higher-level object,
+    # the dictionary, to get the length of the stream. So it mixes the lexical
+    # and grammatical levels. The only way to move forward is to code the
+    # grammer parser in parallel with the lexical parser: the token stream
+    # needs to be parsed into higher-level objects on-the-fly, as tokens are
+    # retrieved. This will probably require a token lookahead mechanism.
+
+    # Also, when a dictionary has been parsed (up to the end-of-dict token)
+    # that includes a /Length key, and this dictionary is immediately followed
+    # by an optional EOL token, then a STREAM_BEGIN token, and finally a CRLF
+    # or LF (but not CR), at that point the grammar level must hand down the
+    # length information to the lexical parser, so it can read the bytes in the
+    # stream.
+
+    # The BinFile must be tested for reading a very large number of bytes as
+    # compared to the block size.
