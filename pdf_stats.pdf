@@ -9,6 +9,7 @@ import binfile
 
 EOL = '(\r\n|\r|\n)'
 bEOL = b'(\r\n|\r|\n)'
+bEOLSP = b'(\r\n| \r| \n)'
 
 #-------------------------------------------------------------------------------
 # I want stdout to be unbuffered, always
@@ -68,6 +69,23 @@ def get_version(filepath):
             return 0, 0
 
 #-------------------------------------------------------------------------------
+# count_updates
+#-------------------------------------------------------------------------------
+
+# FIXME too long !!!
+def count_updates(filepath):
+    """Count the number of EOF markers."""
+    cnt = 0
+    with open(filepath, 'rb') as f:
+        while True: 
+            line = f.readline()
+            if line == '':
+                return cnt
+            m = re.match(b'%%PDF' + bEOL, line)
+            if m:
+                cnt += 1
+
+#-------------------------------------------------------------------------------
 # get_trailer - read file from the end, extract trailer dict and xref offset
 #-------------------------------------------------------------------------------
 
@@ -100,20 +118,144 @@ def get_trailer(filepath):
             trailer = True
             
     return trailer, offset 
-               
+
+#-------------------------------------------------------------------------------
+# get_xref - read file from the end, extract the xref table
+#-------------------------------------------------------------------------------
+
+def get_xref(filepath):
+    """Extract the xref table."""
+    offset = -1
+    trailer = False
+
+    # print(f'get_xref: filepath={filepath}')
+    
+    with FileReadBackwards(filepath) as f:
+        # Last line
+        line = f.readline()
+        m = re.match('%%EOF' + EOL, line)
+        if not m:
+            print('syntax error: no EOF marker')
+
+        # Byte offset of last cross-reference section
+        line = f.readline().rstrip()
+        offset = int(line)
+
+    with open(filepath, 'rb') as g:
+        # Get a BinFile object so we can move forward 20 bytes at a time
+        # bf = binfile.BinFile(filepath, g)
+        g.seek(offset)
+        line = g.readline()
+        m = re.match(b'xref' + bEOL, line)
+        if not m:
+            # ignoring file: xref not found where expected from offset
+            return 0, False
+
+        # Loop over cross-reference subsections
+        sub_sections = []
+        while True:
+            line = g.readline()
+            if line == b'':
+                break
+            # print(f'line={line}')
+            m = re.match(b'(\d+) (\d+)' + bEOL, line)
+            if not m:
+                # No more sub-sections, but what is in 'line' ? Don't know yet
+                break
+            objn = first_obj_nbr = int(m.group(1))
+            entry_cnt = int(m.group(2))
+            
+            # I'm assuming entry_cnt is not 0 
+            entries = []
+            for i in range(entry_cnt):
+                line = g.readline()
+                pat = b'(\d{10}) (\d{5}) ([nf])' + bEOLSP
+                m = re.match(pat, line)
+                if not m:
+                    # I know the entry count, this should never happen
+                    raise ValueError(f'Fatal error: found "{line}" instead of a xref entry')
+                x = int(m.group(1))  # offset, if in_use, or object number if free
+                gen = int(m.group(2))
+                in_use = m.group(3) == 'n'
+                entries.append((objn, x, gen, in_use))
+                objn += 1
+            # Finish off the this sub-section
+            sub_sections.append(entries)
+
+        # We've read some data into 'line', it's neither a sub-section header,
+        # nor a xref entry. Need to analyze it further.
+        trailer_follows = False
+        m = re.match(b'trailer' + bEOL, line)
+        if m:
+            # Trailer immediately follows xref
+            trailer_follows = True
+
+        # # Print out what we found
+        # for s in sub_sections:
+        #     for e in entries:
+        #         (objn, x, gen, in_use) = e
+        #         print(f'{objn}, {x}, {gen}, {in_use}')
+        #     print()
+
+        return (len(sub_sections), trailer_follows)
+        
+#-------------------------------------------------------------------------------
+# stats_file_to_csv
+#-------------------------------------------------------------------------------
+
+def stats_file_to_csv(filepath, filename):
+            # Get the file size
+            statinfo = os.stat(filepath)
+            sz = statinfo.st_size
+
+            # Get other info
+            eol = get_eol(filepath)
+            major, minor = get_version(filepath)
+            trailer, offset = get_trailer(filepath)
+            # eofs = count_updates(filepath)
+            nsubs, tfollows = get_xref(filepath)
+            s = (f'{filename};{major}.{minor};{eol:4}'
+                     + f';{"true" if trailer else "false"};{offset:8};{sz}')
+            print(s, end='')
+            if(nsubs == 0):
+                s = ';ignored;ignored'
+            else:
+                s = f';{nsubs};{"true" if tfollows else "false"}'
+            print(s)
+            
+        
+#-------------------------------------------------------------------------------
+# stats_dir_to_csv
+#-------------------------------------------------------------------------------
+
+def stats_dir_to_csv(path):
+    print('Filename;Version;EOL;Trailer;Offset;FileSize;#SubSections;TFollows')
+    for f in os.listdir(path):
+        if f.endswith('.pdf'):
+            filepath = os.path.join(path, f)
+            stats_file_to_csv(filepath, f)
+
+
 #-------------------------------------------------------------------------------
 # main
 #-------------------------------------------------------------------------------
             
 if __name__ == '__main__':
-    # path = r'C:\Users\joao.moreira.INV\OneDrive - INVIVOO\Books'
+    # My pdf file repository
     path = r'C:\u\pdf'
-    print('Filename;Version;EOL;Trailer;Offset')
-    for f in os.listdir(path):
-        if f.endswith('.pdf'):
-            filepath = os.path.join(path, f)
-            eol = get_eol(filepath)
-            major, minor = get_version(filepath)
-            trailer, offset = get_trailer(filepath)
-            print(f'{f};{major}.{minor};{eol:4};{" true" if trailer else "false"}'
-                  + f';{offset:8}')
+
+    # Check cmd line arguments
+    if len(sys.argv) == 2:
+        filename = sys.argv[1]
+        filepath = os.path.join(path, filename)
+        stats_file_to_csv(filepath, filename)
+    else:
+        stats_dir_to_csv(path)
+
+    # # Check cmd line arguments
+    # if len(sys.argv) < 2:
+    #     print(f'usage: {sys.argv[0]} <filepath>')
+    #     sys.exit()
+    # filepath = sys.argv[1]
+    
+    # get_xref(filepath)
