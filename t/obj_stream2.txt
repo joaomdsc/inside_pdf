@@ -1,0 +1,11 @@
+13 /byebye
+<< /First (x) /Second 841.89 /Sub
+    <<
+        /One (blabla)
+	/two 3.14
+	/lower << /white 0 /Black 1>> /nice 1.0 >>
+	/Hello 345
+	/Goodbye (goodnight)
+        /more (xxx)
+    >>
+(Hello)

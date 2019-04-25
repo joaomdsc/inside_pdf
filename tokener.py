@@ -37,7 +37,7 @@ class EToken(Enum):
     INTEGER = auto()
     REAL = auto()
     # I'm not sure I need to distinguish the next 2 tokens. Maybe just knowing
-    # that its' a string will turn out to be enough.
+    # that it's a string will turn out to be enough.
     LITERAL_STRING = auto()  # (xxxxx) FIXME maybe a single STRING token ?
     HEX_STRING = auto()      # <xxxxx>
     NAME = auto()            # /xxxxx
@@ -93,13 +93,11 @@ Tokens are separated from each other by whitespace and/or delimiter characters.
         s += ')'
         return s
 
-    def indent_chg(self):
-        if self.type in [EToken.ARRAY_BEGIN, EToken.DICT_BEGIN, EToken.OBJECT_BEGIN]:
-            return 1
-        elif self.type in [EToken.ARRAY_END, EToken.DICT_END, EToken.OBJECT_END]:
-            return -1
-        else:
-            return 0
+    def begin(self):
+        return self.type in [EToken.ARRAY_BEGIN, EToken.DICT_BEGIN, EToken.OBJECT_BEGIN]
+
+    def end(self):
+        return self.type in [EToken.ARRAY_END, EToken.DICT_END, EToken.OBJECT_END]
         
     def print_indented(self, indent):
         print(' '*4*indent + self.__str__())
@@ -119,14 +117,16 @@ class Tokener:
     def __init__(self, filepath, f):
         self.bf = binfile.BinFile(filepath, f)
         self.f = f
+        self.cc = self.bf.next_byte()
         self.parens = 0
+        self.peeked = []
         
     #---------------------------------------------------------------------------
     # get_literal_string
     #---------------------------------------------------------------------------
 
     def get_literal_string(self):
-        """Found the opening paren, get the entire string."""
+        """Found the opening paren, now get the entire string."""
         # The opening parens did not go into ls. We have not yet read the
         # first character of the literal.
         ls = bytearray()
@@ -311,11 +311,11 @@ class Tokener:
         return t
       
     #---------------------------------------------------------------------------
-    # next_token
+    # get_next_token
     #---------------------------------------------------------------------------
  
-    def next_token(self):
-        """Get the next token."""
+    def get_next_token(self):
+        """Get and return the next token from the input stream."""
         # Invariant: cc has been read from the stream, but not yet analyzed. It
         # is stored (persisted in between calls) in self.cc. This means that
         # every time control leaves this function (through return), it must
@@ -451,6 +451,33 @@ class Tokener:
             # Here we should just recognize a run of regular characters.
             self.cc = cc
             return self.get_regular_run()
+      
+    #---------------------------------------------------------------------------
+    # next_token
+    #---------------------------------------------------------------------------
+ 
+    def next_token(self):
+        """Return the next token from the input stream."""
+        # Invariant: cc has been read from the stream, but not yet analyzed. It
+        # is stored (persisted in between calls) in self.cc. This means that
+        # every time control leaves this function (through return), it must
+        # read, but not analyze, the next character, and store it in sefl.cc.
+
+        # Did we peek previously ?
+        if len(self.peeked) > 0:
+            return self.peeked.pop(0)  # self.peeked is a FIFO, not stack
+
+        return self.get_next_token()
+      
+    #---------------------------------------------------------------------------
+    # peek_token
+    #---------------------------------------------------------------------------
+ 
+    def peek_token(self):
+        """Return the next token, without removing it from the input stream."""
+        tok = self.get_next_token()
+        self.peeked.append(tok)
+        return tok
 
 #-------------------------------------------------------------------------------
 # main

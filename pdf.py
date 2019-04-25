@@ -7,6 +7,7 @@ import sys
 from enum import Enum, auto, unique
 import binfile
 from tokener import Tokener, EToken
+from objects import ObjStream, EObject
 
 #-------------------------------------------------------------------------------
 # I want stdout to be unbuffered, always
@@ -35,15 +36,38 @@ def parse_tokens(filepath):
     # Parse a character stream into a token stream
     with open(filepath, 'rb') as f:
         tk = Tokener(filepath, f)
-        tk.cc = tk.bf.next_byte()
+        # tk.cc = tk.bf.next_byte()
         indent = 0
         while True:
             t = tk.next_token()
             if t.type == EToken.PARSE_EOF:
                 break
-            indent += t.indent_chg()
+            if t.end():
+                indent -= 1
             t.print_indented(indent)
+            if t.begin():
+                indent += 1
+
             tokens.append(t)
+
+#-------------------------------------------------------------------------------
+# parse_objects
+#-------------------------------------------------------------------------------
+
+def parse_objects(filepath):
+    # Array for object storage 
+    objects = []
+
+    # Parse a character stream into a object stream
+    with open(filepath, 'rb') as f:
+        ob = ObjStream(filepath, f)
+        indent = 0
+        while True:
+            o = ob.next_object()
+            if o.type == EObject.PARSE_EOF:
+                break
+            print(o)
+            objects.append(o)
 
 #-------------------------------------------------------------------------------
 # main
@@ -56,7 +80,8 @@ if __name__ == '__main__':
         exit(-1)
     filepath = sys.argv[1]
     
-    parse_tokens(filepath)
+    # parse_tokens(filepath)
+    parse_objects(filepath)
 
     # Notes: the flex_bison.pdf has some unexpected data:
     #

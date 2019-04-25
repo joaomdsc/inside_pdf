@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # binfile_t.py
 
 import os

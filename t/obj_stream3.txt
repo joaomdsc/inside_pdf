@@ -1,0 +1,21 @@
+99 /xx
+    <<
+        /First
+	    [
+		(aaa) (bbb) << /hi bye /yo [1 2 3]>> (ccc)
+	    ]
+        /Second 841.89
+	/Sub
+	    <<
+	        /One (balbla)
+		/two 3.14
+		/lower [
+		    << /white [56 28 54 (x) 19] /Black 1>> 5 (xy)
+		]
+                /nice 1.0
+	    >>
+	/Hello 345
+	/Goodbye (goodnight)
+	/more (xxx)
+    >>
+(Hello)

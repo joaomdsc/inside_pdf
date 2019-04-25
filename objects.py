@@ -25,72 +25,56 @@ import sys
 sys.stdout = Unbuffered(sys.stdout)
 
 #-------------------------------------------------------------------------------
-#  EToken
+#  EObject
 #-------------------------------------------------------------------------------
 
-# Possible token types in PDF files
+# Possible object types in PDF files
 @unique
-class EToken(Enum):
-    PARSE_ERROR = auto()     # pseudo-token describing a parsing error 
-    PARSE_EOF = auto()       # pseudo-token describing the EOF condition
-    VERSION_MARKER = auto()  # %PDF-n.m
-    EOF_MARKER = auto()      # %%EOF
+class EObject(Enum):
+    PARSE_ERROR = auto()     # pseudo-object describing a parsing error 
+    PARSE_EOF = auto()       # pseudo-object describing the EOF condition
+    BOOLEAN = auto()
     INTEGER = auto()
     REAL = auto()
-    # I'm not sure I need to distinguish the next 2 tokens. Maybe just knowing
-    # that its' a string will turn out to be enough.
-    LITERAL_STRING = auto()  # (xxxxx) FIXME maybe a single STRING token ?
-    HEX_STRING = auto()      # <xxxxx>
-    NAME = auto()            # /xxxxx
-    ARRAY_BEGIN = auto()     # '['
-    ARRAY_END = auto()       # ']'
-    DICT_BEGIN = auto()      # '<<'
-    DICT_END = auto()        # '>>'
-    TRUE = auto()            # true
-    FALSE = auto()           # false
-    NULL = auto()            # null
-    OBJECT_BEGIN = auto()    # obj
-    OBJECT_END = auto()      # endobj
-    STREAM_BEGIN = auto()    # stream
-    STREAM_END = auto()      # endstream
-    OBJ_REF = auto()         # 'R'
-    XREF_SECTION = auto()    # xref
-    TRAILER = auto()         # trailer
-    STARTXREF = auto()       # startxref
-    CR = auto()              # carriage return, \r, 0d
-    LF = auto()              # newline, \n, 0a
-    CRLF = auto()            # \r\n, 0d0a
+    STRING = auto()
+    NAME = auto()
+    ARRAY = auto()
+    DICTIONARY = auto()
+    STREAM = auto()
+    NULL = auto()
+    IND_OBJ_DEF = auto()    # indirect object definition
+    IND_OBJ_REF = auto()    # indirect object reference
 
     def __str__(self):
         """Print out 'NAME' instead of 'EToken.NAME'."""
         return self.name
 
 #-------------------------------------------------------------------------------
-# class Token
+# class PdfObject
 #-------------------------------------------------------------------------------
 
-class Token():
-    """Tokens are parsed from the input character stream.
-Tokens are separated from each other by whitespace and/or delimiter characters.
-"""
+class PdfObject():
+    """PDF objects are parsed from the input token stream."""
     def __init__(self, type, data=None):
         self.type = type
         self.data = data
 
     def __str__(self):
         s = f'{self.type}('
-        if self.type == EToken.VERSION_MARKER:
-            (major, minor) = self.data
-            s += f'{major}, {minor}'
-        elif self.type == EToken.INTEGER or self.type == EToken.REAL:
-            s += str(self.data)
-        elif self.type == EToken.LITERAL_STRING or self.type == EToken.HEX_STRING:
+        if self.type in [EObject.BOOLEAN, EObject.INTEGER, EObject.REAL]:
+            s += f'{self.data}'
+        elif self.type == EObject.STRING or self.type == EObject.NAME:
             s += self.data[:len(self.data)].decode('unicode_escape')
-        elif self.type == EToken.NAME:
-            # FIXME non ascii bytes may be found in here
-            s += self.data.decode()
-        elif self.type == EToken.PARSE_ERROR:
-            s += self.data
+        elif self.type == EObject.ARRAY:
+            s += '['
+            for x in self.data:
+                s += f'{x}, '
+            s += ']'
+        elif self.type == EObject.DICTIONARY:
+            s += '{'
+            for k, v in self.data.items():
+                s += f'({k}, {v}), '
+            s += '}'
         s += ')'
         return s
 
@@ -104,143 +88,174 @@ class ObjStream:
     def __init__(self, filepath, f):
         self.tk = Tokener(filepath, f)
         self.f = f
-        self.tok = None
+        self.tok = self.tk.next_token()
+      
+    #---------------------------------------------------------------------------
+    # get_array
+    #---------------------------------------------------------------------------
+ 
+    def get_array(self):
+        """Found the opening ARRAY_BEGIN token, now get the entire array."""
+        # Arrays can hold any kind of objects, including other arrays and
+        # dictionaries.
+
+        # Prepare an array object
+        arr = []
+
+        tok = self.tk.next_token()
+        while True:
+            if tok.type == EToken.ARRAY_END:
+                # It's a python array, but the elements are PdfObjects
+                return PdfObject(EObject.ARRAY, arr)
+            self.tok = tok
+            obj = self.next_object()
+            tok = self.tok
+            # The next token is already stored in self.tok, but it hasn't been
+            # analyzed yet.
+            arr.append(obj)
+      
+    #---------------------------------------------------------------------------
+    # get_dictionary
+    #---------------------------------------------------------------------------
+ 
+    def get_dictionary(self):
+        """Found the opening DICT_BEGIN token, now get the entire dictionary."""
+        # Dictionaries are sets of (key, value) pairs, where the value can be
+        # any kind of object, including arrays and other dictionaries.
+
+        # Prepare a dictionary object
+        d = {}
+
+        #=======================================================================
+        # FIXME line breaks inside a dictionary are not recognized
+        #=======================================================================
+
+        tok = self.tk.next_token()
+        while True:
+            if tok.type == EToken.DICT_END:
+                # It's a python dictionary, but the values are PdfObjects
+                return PdfObject(EObject.DICTIONARY, d)
+            if tok.type == EToken.NAME:
+                tok2 = self.tk.next_token()
+                self.tok = tok2
+                obj = self.next_object()
+                # FIXME: what if there was some object it couldn't parse ?
+                # i.e. handle PARSE_ERROR and PARSE_EOF
+                # FIXME: can any bytes object be decoded like this ?
+                # FIXME: I've lost the keys' original bytes object
+                d[tok.data.decode('unicode_escape')] = obj            
+
+                # The next token is already stored in self.tok, but it hasn't
+                # been analyzed yet.
+                tok = self.tok
+            elif tok.type in [EToken.CR, EToken.LF, EToken.CRLF]:
+                tok = self.tk.next_token()
+            else:
+                return PdfObject(EObject.PARSE_ERROR)
       
     #---------------------------------------------------------------------------
     # next_object
     #---------------------------------------------------------------------------
  
     def next_object(self):
-        """Get the next object."""
+        """Get the next object as a PdfObject."""
         # Invariant: tok has been read from the stream, but not yet analyzed. It
         # is stored (persisted in between calls) in self.tok. This means that
         # every time control leaves this function (through return), it must
         # read, but not analyze, the next token, and store it in self.tok.
         tok = self.tok
 
+        # Ignore CRLF (why do I parse the tokens then ?)
+        while tok.type == EToken.CRLF:
+            tok = self.tok = self.tk.next_token()
+        
         # Have we reached EOF ?
-        if tok == Token(EToken.PARSE_EOF):
-            return obj_eof
+        if tok.type == EToken.PARSE_EOF:
+            return PdfObject(EObject.PARSE_EOF)
+        elif tok.type == EToken.PARSE_ERROR:
+            return PdfObject(EObject.PARSE_ERROR)
 
-        # Now cc is either a delimiter or a regular character
-        if cc == ord('('):
-            # begin literal string
-            self.parens = 1
-            ls = self.get_literal_string()
-            # cc is on the closing parens, call next_byte() so that when we
-            # return, cc is the next not-yet-analyzed byte.
-            self.cc = self.bf.next_byte()
-            return Token(EToken.LITERAL_STRING, ls)
-        elif cc == ord('<'):
-            cc2 = self.bf.peek_byte()
-            if cc2 == -1:
-                # There's no byte to peek at
-                # FIXME this is an error situation
-                return -1
-            if cc2 in Tokener.hex_digit:
-                # begin hex string
-                hs = self.get_hex_string()
-                # cc is on the closing 'greater than', call next_byte() so that
-                # when we return, cc is the next not-yet-analyzed byte.
-                self.cc = self.bf.next_byte()
-                return Token(EToken.HEX_STRING, hs)
-            elif cc2 == ord('<'):
-                # begin dictionary
-                self.bf.next_byte()  # move input stream forward, past peeked char
-                self.cc = self.bf.next_byte()  # next byte to analyze
-                return Token(EToken.DICT_BEGIN)
-            else:
-                # The initial '<' wasn't followed by expected data, this is an
-                # error. 
-                self.cc = self.bf.next_byte()
-                return Token(EToken.PARSE_ERROR,
-                             "error: '<' not followed by hex digit or second '<'")
-        elif cc == ord('>'):
-            cc2 = self.bf.peek_byte()
-            if cc2 == -1:
-                # There's no byte to peek at
-                # FIXME this is an error situation
-                return -1
-            elif cc2 == ord('>'):
-                # end dictionary
-                self.bf.next_byte()  # read the one I've peeked
-                self.cc = self.bf.next_byte()
-                return Token(EToken.DICT_END)
-            else:
-                # The initial '>' wasn't followed by expected data, this is an
-                # error. 
-                self.cc = self.bf.next_byte()
-                return Token(EToken.PARSE_ERROR,
-                             "error: '>' not followed by a second '>'")
-        elif cc == ord('/'):
-            # begin name
-            name = self.get_name()
-            # self.cc is on a delimiter or whitespace, to be analyzed.
-            return Token(EToken.NAME, name)
-        elif cc == ord('%'):
-            # begin comment
-            s = self.bf.peek_byte(7)
-            m = re.match(rb'PDF-(\d).(\d)', s)
-            if m:
-                self.bf.next_byte(7)  # move forward over the peeked chars
-                self.cc = self.bf.next_byte()
-                return Token(EToken.VERSION_MARKER,
-                             (int(m.group(1)), int(m.group(2))))
-            s = self.bf.peek_byte(4)
-            if s == b'%EOF':
-                self.bf.next_byte(4)  # move forward over the peeked chars
-                self.cc = self.bf.next_byte()
-                return Token(EToken.EOF_MARKER)
-            while True:
-                # FIXME add a token type COMMENT and keep the value
-                # we need to ignore characters up to eol.
-                cc = self.bf.next_byte()
-                if cc == ord('\r'):
-                    cc2 = self.bf.peek_byte()
-                    if cc2 == ord('\n'):
-                        # we've found '\r\n', dos-style eol
-                        self.bf.next_byte()  # move forward over the peeked char
-                        self.cc = self.bf.next_byte()
-                        return Token(EToken.CRLF)
-                    # we've found '\r', mac-style eol
-                    self.cc = self.bf.next_byte()
-                    return Token(EToken.CR)
-                elif cc == ord('\n'):
-                    # we've found '\n', unix-style eol
-                    self.cc = self.bf.next_byte()
-                    return Token(EToken.LF)
-        elif cc == ord('['):
-            self.cc = self.bf.next_byte()
-            return Token(EToken.ARRAY_BEGIN)
-        elif cc == ord(']'):
-            self.cc = self.bf.next_byte()
-            return Token(EToken.ARRAY_END)
-        elif cc == ord('\r'):
-            cc2 = self.bf.peek_byte()
-            if cc2 == ord('\n'):
-                # we've found '\r\n', dos-style eol
-                self.bf.next_byte()  # move forward over the peeked char
-                self.cc = self.bf.next_byte()
-                return Token(EToken.CRLF)
-            # we've found '\r', mac-style eol
-            self.cc = self.bf.next_byte()
-            return Token(EToken.CR)
-        elif cc == ord('\n'):
-            # we've found '\n', unix-style eol
-            self.cc = self.bf.next_byte()
-            return Token(EToken.LF)
-        elif cc in b')>}':
-            self.cc = self.bf.next_byte()
-            return Token(EToken.PARSE_ERROR,
-                         "error: unexpected character '{c}'")
+        # Now analyze tok: is it a boolean ?
+        elif tok.type == EToken.TRUE:
+            self.tok = self.tk.next_token()
+            return PdfObject(EObject.BOOLEAN, True)
+        elif tok.type == EToken.FALSE:
+            self.tok = self.tk.next_token()
+            return PdfObject(EObject.BOOLEAN, False)
+
+        # Is it an integer number ?
+        elif tok.type == EToken.INTEGER:
+            # Attempt to find the longest match first. Object definitions and
+            # references are two integers plus another token, they must be
+            # parsed first, and if not found, then we'll settle for the simple
+            # integer.
+            
+            # Lookahead 1 token. If we find another integer, keep looking.
+            # If we find an OBJECT_BEGIN, then we have an indirect object
+            # definition.
+            # If we find an OBJ_REF, then we have an indirect reference.
+            tok2 = self.tk.peek_token()
+            if tok2.type == EToken.INTEGER:
+                # Keep looking
+                tok3 = self.tk.peek_token()
+                if tok3.type == EToken.OBJECT_BEGIN:
+                    # Start creating the object with the object number (from
+                    # tok) and generation number (from tok2)
+                    obj = self.next_object()
+                    self.tk.next_token()  # peeked tok2
+                    self.tk.next_token()  # peeked tok3
+                    return PdfObject(EObject.IND_OBJ_DEF,
+                                     data=dict(obj=obj, objn=tok.data, gen=tok2.data))
+                elif tok3.type == EToken.OBJ_REF:
+                    self.tk.next_token()  # peeked tok2
+                    self.tk.next_token()  # peeked tok3
+                    self.tok = self.tk.next_token()
+                    return PdfObject(EObject.IND_OBJ_REF,
+                                     data=dict(objn=tok.data, gen=tok2.data))
+            # Ignore tok2, we re-read it anyway
+            self.tok = self.tk.next_token()
+            return PdfObject(EObject.INTEGER, tok.data)
+
+        # Is it a real number ?
+        elif tok.type == EToken.REAL:
+            self.tok = self.tk.next_token()
+            return PdfObject(EObject.REAL, tok.data)
+
+        # Is it a string ?
+        elif tok.type in [EToken.LITERAL_STRING, EToken.HEX_STRING]:
+            self.tok = self.tk.next_token()
+            return PdfObject(EObject.STRING, tok.data)  # bytearray
+
+        # Is it a name ?
+        elif tok.type == EToken.NAME:
+            self.tok = self.tk.next_token()
+            return PdfObject(EObject.NAME, tok.data)  # bytearray
+
+        # Is it an array ?
+        elif tok.type == EToken.ARRAY_BEGIN:
+            # self.tok already has the right value, tok was taken from there
+            obj = self.get_array()
+            self.tok = self.tk.next_token()
+            return obj
+
+        # Is it a dictionary ?
+        elif tok.type == EToken.DICT_BEGIN:
+            # self.tok already has the right value, tok was taken from there
+            obj = self.get_dictionary()
+            self.tok = self.tk.next_token()
+            return obj
+
+        # Is it a stream ? FIXME
+
+        # Is it null ?
+        elif tok.type == EToken.NULL:
+            self.tok = self.tk.next_token()
+            return PdfObject(EObject.NULL)
+
+        # Nothing that was expected here
         else:
-            # Neither whitespace nor delimiter, cc is a regular character.
-            # Recognize keywords: true, false, null, obj, endobj, stream,
-            # endstream, R, xref, trailer, startxref.
-            # Recognize numbers
-            # Here we should just recognize a run of regular characters.
-            self.cc = cc
-            return self.get_regular_run()
+            self.tok = self.tk.next_token()
+            return PdfObject(EObject.PARSE_ERROR)
 
 #-------------------------------------------------------------------------------
 # main
