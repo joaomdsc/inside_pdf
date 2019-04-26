@@ -31,8 +31,8 @@ sys.stdout = Unbuffered(sys.stdout)
 # Possible object types in PDF files
 @unique
 class EObject(Enum):
-    PARSE_ERROR = auto()     # pseudo-object describing a parsing error 
-    PARSE_EOF = auto()       # pseudo-object describing the EOF condition
+    ERROR = auto()     # pseudo-object describing a parsing error 
+    EOF = auto()       # pseudo-object describing the EOF condition
     BOOLEAN = auto()
     INTEGER = auto()
     REAL = auto()
@@ -75,6 +75,8 @@ class PdfObject():
             for k, v in self.data.items():
                 s += f'({k}, {v}), '
             s += '}'
+        elif self.type == EObject.IND_OBJ_REF:
+            s += f"{self.data['objn']} {self.data['gen']} R"
         s += ')'
         return s
 
@@ -88,6 +90,11 @@ class ObjStream:
     def __init__(self, filepath, f):
         self.tk = Tokener(filepath, f)
         self.f = f
+        self.tok = self.tk.next_token()
+
+    def reset(self, offset):
+        self.tk.reset(offset)
+        # Normal init
         self.tok = self.tk.next_token()
       
     #---------------------------------------------------------------------------
@@ -140,7 +147,7 @@ class ObjStream:
                 self.tok = tok2
                 obj = self.next_object()
                 # FIXME: what if there was some object it couldn't parse ?
-                # i.e. handle PARSE_ERROR and PARSE_EOF
+                # i.e. handle ERROR and EOF
                 # FIXME: can any bytes object be decoded like this ?
                 # FIXME: I've lost the keys' original bytes object
                 d[tok.data.decode('unicode_escape')] = obj            
@@ -151,7 +158,7 @@ class ObjStream:
             elif tok.type in [EToken.CR, EToken.LF, EToken.CRLF]:
                 tok = self.tk.next_token()
             else:
-                return PdfObject(EObject.PARSE_ERROR)
+                return PdfObject(EObject.ERROR)
       
     #---------------------------------------------------------------------------
     # next_object
@@ -166,14 +173,14 @@ class ObjStream:
         tok = self.tok
 
         # Ignore CRLF (why do I parse the tokens then ?)
-        while tok.type == EToken.CRLF:
+        while tok.type in [EToken.CR, EToken.LF, EToken.CRLF]:
             tok = self.tok = self.tk.next_token()
         
         # Have we reached EOF ?
-        if tok.type == EToken.PARSE_EOF:
-            return PdfObject(EObject.PARSE_EOF)
-        elif tok.type == EToken.PARSE_ERROR:
-            return PdfObject(EObject.PARSE_ERROR)
+        if tok.type == EToken.EOF:
+            return PdfObject(EObject.EOF)
+        elif tok.type == EToken.ERROR:
+            return PdfObject(EObject.ERROR)
 
         # Now analyze tok: is it a boolean ?
         elif tok.type == EToken.TRUE:
@@ -201,9 +208,10 @@ class ObjStream:
                 if tok3.type == EToken.OBJECT_BEGIN:
                     # Start creating the object with the object number (from
                     # tok) and generation number (from tok2)
-                    obj = self.next_object()
                     self.tk.next_token()  # peeked tok2
                     self.tk.next_token()  # peeked tok3
+                    self.tok = self.tk.next_token()
+                    obj = self.next_object()
                     return PdfObject(EObject.IND_OBJ_DEF,
                                      data=dict(obj=obj, objn=tok.data, gen=tok2.data))
                 elif tok3.type == EToken.OBJ_REF:
@@ -255,7 +263,7 @@ class ObjStream:
         # Nothing that was expected here
         else:
             self.tok = self.tk.next_token()
-            return PdfObject(EObject.PARSE_ERROR)
+            return PdfObject(EObject.ERROR)
 
 #-------------------------------------------------------------------------------
 # main

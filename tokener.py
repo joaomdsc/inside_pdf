@@ -30,8 +30,8 @@ sys.stdout = Unbuffered(sys.stdout)
 # Possible token types in PDF files
 @unique
 class EToken(Enum):
-    PARSE_ERROR = auto()     # pseudo-token describing a parsing error 
-    PARSE_EOF = auto()       # pseudo-token describing the EOF condition
+    ERROR = auto()     # pseudo-token describing a parsing error 
+    EOF = auto()       # pseudo-token describing the EOF condition
     VERSION_MARKER = auto()  # %PDF-n.m
     EOF_MARKER = auto()      # %%EOF
     INTEGER = auto()
@@ -88,7 +88,7 @@ Tokens are separated from each other by whitespace and/or delimiter characters.
         elif self.type == EToken.NAME:
             # FIXME non ascii bytes may be found in here
             s += self.data.decode()
-        elif self.type == EToken.PARSE_ERROR:
+        elif self.type == EToken.ERROR:
             s += self.data
         s += ')'
         return s
@@ -117,6 +117,13 @@ class Tokener:
     def __init__(self, filepath, f):
         self.bf = binfile.BinFile(filepath, f)
         self.f = f
+        self.cc = self.bf.next_byte()
+        self.parens = 0
+        self.peeked = []
+
+    def reset(self, offset):
+        self.bf.reset(offset)
+        # Normal init
         self.cc = self.bf.next_byte()
         self.parens = 0
         self.peeked = []
@@ -305,16 +312,16 @@ class Tokener:
                     t = Token(EToken.REAL, float(s))
                 except ValueError:
                     self.cc = cc
-                    return Token(EToken.PARSE_ERROR,
+                    return Token(EToken.ERROR,
                                  "Unrecognized regular character run.")              
         self.cc = cc
         return t
       
     #---------------------------------------------------------------------------
-    # get_next_token
+    # _next_token
     #---------------------------------------------------------------------------
  
-    def get_next_token(self):
+    def _next_token(self):
         """Get and return the next token from the input stream."""
         # Invariant: cc has been read from the stream, but not yet analyzed. It
         # is stored (persisted in between calls) in self.cc. This means that
@@ -324,13 +331,13 @@ class Tokener:
 
         # Have we reached EOF ?
         if cc == -1:
-            return Token(EToken.PARSE_EOF)
+            return Token(EToken.EOF)
 
         # Start analyzing 
         while cc in Tokener.wspace:
             cc = self.bf.next_byte()
             if cc == -1:
-                return Token(EToken.PARSE_EOF)
+                return Token(EToken.EOF)
 
         # Now cc is either a delimiter or a regular character
         if cc == ord('('):
@@ -363,7 +370,7 @@ class Tokener:
                 # The initial '<' wasn't followed by expected data, this is an
                 # error. 
                 self.cc = self.bf.next_byte()
-                return Token(EToken.PARSE_ERROR,
+                return Token(EToken.ERROR,
                              "error: '<' not followed by hex digit or second '<'")
         elif cc == ord('>'):
             cc2 = self.bf.peek_byte()
@@ -380,7 +387,7 @@ class Tokener:
                 # The initial '>' wasn't followed by expected data, this is an
                 # error. 
                 self.cc = self.bf.next_byte()
-                return Token(EToken.PARSE_ERROR,
+                return Token(EToken.ERROR,
                              "error: '>' not followed by a second '>'")
         elif cc == ord('/'):
             # begin name
@@ -441,7 +448,7 @@ class Tokener:
             return Token(EToken.LF)
         elif cc in b')>}':
             self.cc = self.bf.next_byte()
-            return Token(EToken.PARSE_ERROR,
+            return Token(EToken.ERROR,
                          "error: unexpected character '{c}'")
         else:
             # Neither whitespace nor delimiter, cc is a regular character.
@@ -467,7 +474,7 @@ class Tokener:
         if len(self.peeked) > 0:
             return self.peeked.pop(0)  # self.peeked is a FIFO, not stack
 
-        return self.get_next_token()
+        return self._next_token()
       
     #---------------------------------------------------------------------------
     # peek_token
@@ -475,7 +482,7 @@ class Tokener:
  
     def peek_token(self):
         """Return the next token, without removing it from the input stream."""
-        tok = self.get_next_token()
+        tok = self._next_token()
         self.peeked.append(tok)
         return tok
 

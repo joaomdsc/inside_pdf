@@ -37,6 +37,15 @@ class BinFile:
         self.peek_ahead = False
         self.next_buf = b''  # when peek_ahead is True, use this for peek
 
+    def reset(self, offset):
+        self.f.seek(offset)
+        # Normal init
+        self.buf = b''  # normal
+        self.i = 0
+        self.peek_ahead = False
+        self.next_buf = b''  # when peek_ahead is True, use this for peek
+        
+
     def close(self):
         self.f.close()
         
