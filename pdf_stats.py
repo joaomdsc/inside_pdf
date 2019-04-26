@@ -136,7 +136,7 @@ class XrefSubSection:
     def __init__(self, first_objn, entry_cnt):
         self.first_objn = first_objn
         self.entry_cnt = entry_cnt
-        self.entries = []  # each entry is a 4-tuple (objn, x, gen, in_use)
+        self.entries = []  # each entry is a 3-tuple (x, gen, in_use)
 
     def has_object(self, objn, gen):
         return self.first_objn <= objn < self.first_objn + self.entry_cnt
@@ -149,8 +149,8 @@ class XrefSubSection:
 
     def __str__(self):
         s = f'{self.first_objn} {self.entry_cnt}\n'
-        for (objn, x, gen, in_use) in self.entries:
-            s += f'{objn} {x} {gen} {in_use}\n'
+        for (x, gen, in_use) in self.entries:
+            s += f'{x} {gen} {in_use}\n'
         return s
 
 #-------------------------------------------------------------------------------
@@ -180,6 +180,90 @@ class XrefSection:
         return s
 
 #-------------------------------------------------------------------------------
+# get_xref_section - when we are given its offset in the file
+#-------------------------------------------------------------------------------
+
+def get_xref_section(f, offset):
+    f.seek(offset)
+    line = f.readline()
+    # FIXME shouldn't this be handled by the tokener ?
+
+    # Each cross-reference section shall begin with a line containing the
+    # keyword xref.
+    m = re.match(b'xref' + bEOL, line)
+    if not m:
+        # ignoring file: xref not found where expected from offset
+        return 0, False
+
+    # Loop over cross-reference subsections
+    xref_sec = XrefSection()
+    while True:
+        line = f.readline()
+        if line == b'':  # EOF ?
+            break
+
+        # Each cross-reference subsection shall contain entries for a
+        # contiguous range of object numbers. The subsection shall begin
+        # with a line containing two numbers separated by a SPACE (20h),
+        # denoting the object number of the first object in this subsection
+        # and the number of entries in the subsection.
+        m = re.match(b'(\d+) (\d+)' + bEOL, line)
+        if not m:
+            # No more sub-sections, but what is in 'line' ? Don't know yet
+            break
+        first_objn = int(m.group(1))
+        entry_cnt = int(m.group(2))
+
+        # I'm assuming entry_cnt is not 0.
+        subs = XrefSubSection(first_objn, entry_cnt)
+        for i in range(entry_cnt):
+            line = f.readline()
+            pat = b'(\d{10}) (\d{5}) ([nf])' + bEOLSP
+            m = re.match(pat, line)
+            if not m:
+                # I know the entry count, this should never happen
+                raise ValueError(f'Error: found "{line}" instead of a xref entry')
+            x = int(m.group(1))  # offset, if in_use, or object number if free
+            gen = int(m.group(2))
+            in_use = m.group(3) == b'n'
+            subs.entries.append((x, gen, in_use))
+        # Finish off the this sub-section
+        xref_sec.sub_sections.append(subs)
+
+    return xref_sec, line  # FIXME
+
+#-------------------------------------------------------------------------------
+# get_indirect_object - read an indirect object from the file
+#-------------------------------------------------------------------------------
+
+def get_indirect_object(o, ob, xref_sec):
+    # FIXME make this a method of ObjStream, perhaps ? to get the right context ?
+    """Read a dictionary, return it as a python dict with PdfObject values."""
+    if o.type != EObject.IND_OBJ_REF:
+        print(f'Expecting an indirect object reference, got "{o.type}"'
+              + ' instead')
+        return None
+
+    # Now use objn to search the xref table for the file offset where
+    # this catalog dictionary object can be found; seek the file to
+    # that offset, and do another ob.next_object()
+
+    # Catalog dictionary object is found at this offset, go there
+    offset, _, _ = xref_sec.get_object(o.data['objn'], o.data['gen'])
+    ob.reset(offset)
+
+    # Now read the next char, this will be the beginning of
+    # "6082 0 obj^M<</Metadata 6125 0 R ..." where 6082 is the objn
+    o = ob.next_object()
+    if o.type != EObject.IND_OBJ_DEF:
+        print(f'Expecting an indirect object definition, got "{o.type}"'
+              + ' instead')
+        return None
+
+    # The indirect object definition surrounds the object we want
+    return o.data['obj']
+
+#-------------------------------------------------------------------------------
 # get_xref - read file from the end, extract the xref table
 #-------------------------------------------------------------------------------
 
@@ -201,60 +285,19 @@ def get_xref(filepath):
         line = f.readline().rstrip()
         offset = int(line)
 
-     # Here I use a different strategy than the one discussed in get_trailer()
-     # above: I use the offset information to jump to the beginning of the xref
-     # table, parse the entire xref table, and then look for a trailer...
-     # except that sometimes I don't find one :-(
-        
+    # Here I use a different strategy than the one discussed in get_trailer()
+    # above: I use the offset information to jump to the beginning of the xref
+    # table, parse the entire xref table, and then look for a trailer... except
+    # that sometimes I don't find one :-(
+    
     with open(filepath, 'rb') as f:
-        f.seek(offset)
-        line = f.readline()
-        # FIXME shouldn't this be handled by the tokener ?
-        m = re.match(b'xref' + bEOL, line)
-        if not m:
-            # ignoring file: xref not found where expected from offset
-            return 0, False
+        # FIXME I should not be returning the 'line', 'f's state is all I need
+        xref_sec, line = get_xref_section(f, offset)
 
-        # Loop over cross-reference subsections
-        xref_sec = XrefSection()
-        while True:
-            line = f.readline()
-            if line == b'':  # EOF ?
-                break
-            
-            # Each cross-reference subsection shall contain entries for a
-            # contiguous range of object numbers. The subsection shall begin
-            # with a line containing two numbers separated by a SPACE (20h),
-            # denoting the object number of the first object in this subsection
-            # and the number of entries in the subsection.
-            m = re.match(b'(\d+) (\d+)' + bEOL, line)
-            if not m:
-                # No more sub-sections, but what is in 'line' ? Don't know yet
-                break
-            first_objn = int(m.group(1))
-            entry_cnt = int(m.group(2))  # I'm assuming entry_cnt is not 0.
-
-            subs = XrefSubSection(objn, entry_cnt)
-            for i in range(entry_cnt):
-                line = f.readline()
-                pat = b'(\d{10}) (\d{5}) ([nf])' + bEOLSP
-                m = re.match(pat, line)
-                if not m:
-                    # I know the entry count, this should never happen
-                    raise ValueError(f'Fatal error: found "{line}" instead of a xref entry')
-                x = int(m.group(1))  # offset, if in_use, or object number if free
-                gen = int(m.group(2))
-                in_use = m.group(3) == b'n'
-                subs.entries.append((objn, x, gen, in_use))
-                objn += 1
-            # Finish off the this sub-section
-            xref_sec.sub_sections.append(subs)
-
-        # # Print out the cross reference table
-        # print()
-        # print('xref')
-        # print(xref_sec)
-        # print()
+        # Print out the cross reference table
+        print()
+        print('xref')
+        print(xref_sec)
         
         # We've read some data into 'line', it's neither a sub-section header,
         # nor a xref entry. Need to analyze it further.
@@ -282,40 +325,20 @@ def get_xref(filepath):
 
             # What we're really interested in, is the catalog dictionary for
             # the PDF document, which is in the Root key
-            root = o.data['Root']
-            if root.type != EObject.IND_OBJ_REF:
-                print('Syntax error, /Root key should be an indirect reference')
-                return (len(xref_section), trailer_follows)
-            root_objn = root.data['objn']
-            root_gen = root.data['gen']
-
-            # Now use objn to search the xref table for the file offset where
-            # this catalog dictionary object can be found; seek the file to
-            # that offset, and do another ob.next_object()
-
-            # FIXME Use 'gen' as well
-            _, offset, _, _ = xref_sec.get_object(root_objn, root_gen)
-            if not in_use:
-                print('oops: catalog dictionary object is a free entry ?!')
-                return len(xref_sec.sub_sections), trailer_follows
-            
-            # Catalog dictionary object is found at this offset
-            ob.reset(offset)
-             
-            # Now read the next char, this will be the beginning of
-            # "6082 0 obj^M<</Metadata 6125 0 R ..." where 6082 is the objn
-            o = ob.next_object()
-            if o.type != EObject.IND_OBJ_DEF:
-                print('Syntax error, incorrect catalog dictionary')
-                return (len(xref_sec.sub_sections), trailer_follows)
-
-            # We have the indirect object definition surrounding the one we want
-            cat = o.data['obj']
-            #print(cat)
+            root = get_indirect_object(o.data['Root'], ob, xref_sec)
 
             # d is a python dictionary, but the items are PdfObjects
-            d = cat.data
+            d = root.data
             print(f"Catalog dictionary: {filepath.split(';')[0]}")
+            for k, v in d.items():
+                print(f'    {k}: {v}')
+
+            # Next we're interested in the Info dictionary
+            info = get_indirect_object(o.data['Info'], ob, xref_sec)
+
+            # d is a python dictionary, but the items are PdfObjects
+            d = info.data
+            print(f"Information dictionary: {filepath.split(';')[0]}")
             for k, v in d.items():
                 print(f'    {k}: {v}')
              
