@@ -5,8 +5,7 @@ import os
 import re
 import sys
 from file_read_backwards import FileReadBackwards
-import binfile
-from objects import ObjStream, EObject
+from object_stream import EObject, ObjectStream
 
 EOL = '(\r\n|\r|\n)'
 bEOL = b'(\r\n|\r|\n)'
@@ -308,7 +307,7 @@ def get_xref(filepath):
             trailer_follows = True
 
             # We now expect the trailer dictionary
-            ob = ObjStream(filepath, f)
+            ob = ObjectStream(filepath, f)
             o = ob.next_object()
             if o.type != EObject.DICTIONARY:
                 print('Syntax error, incorrect trailer dict')
@@ -341,10 +340,6 @@ def get_xref(filepath):
             print(f"Information dictionary: {filepath.split(';')[0]}")
             for k, v in d.items():
                 print(f'    {k}: {v}')
-             
-            # FIXME I need to re-think the entire ObjStream / Tokener /
-            # BinFile stack, so that I can do a seek() at the character level,
-            # and from there start doing an ob.next_object()
 
         # # Print out what we found
         # for s in xref_section:

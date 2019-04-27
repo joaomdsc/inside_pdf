@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-# binfile_t.py
+# byte_stream_t.py
 
 import os
 import unittest
-import binfile
+import byte_stream
 
 #-------------------------------------------------------------------------------
 # I want stdout to be unbuffered, always
@@ -25,16 +25,16 @@ sys.stdout = Unbuffered(sys.stdout)
 # Tests
 # -----------------------------------------------------------------------------
 
-class BinFileTest(unittest.TestCase):
+class ByteStreamTest(unittest.TestCase):
     """Test the parsing of binary files."""
 
     path = r'D:\joao\src\py\pdf\t'
 
     def test01(self):
         """Test simple next_byte() calls, up to and across the block boundary."""
-        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
         with open(filepath, 'rb') as f:
-            bf = binfile.BinFile(filepath, f, blk_sz=16)
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
         
             cc = bf.next_byte()
             self.assertEqual(ord('0'), cc)
@@ -57,9 +57,9 @@ class BinFileTest(unittest.TestCase):
 
     def test02(self):
         """Test next_byte(3) calls, up to and across the block boundary."""
-        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
         with open(filepath, 'rb') as f:
-            bf = binfile.BinFile(filepath, f, blk_sz=16)
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
         
             s = bf.next_byte(3)
             self.assertEqual(b'012', s)
@@ -74,9 +74,9 @@ class BinFileTest(unittest.TestCase):
 
     def test03(self):
         """Test only peek() within the first block."""
-        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
         with open(filepath, 'rb') as f:
-            bf = binfile.BinFile(filepath, f, blk_sz=16)
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
             cc2 = bf.peek_byte()
             self.assertEqual(ord('0'), cc2)
@@ -96,9 +96,9 @@ class BinFileTest(unittest.TestCase):
 
     def test04(self):
         """Test peek() up to 15 caracters (mustn't exceed block size)."""
-        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
         with open(filepath, 'rb') as f:
-            bf = binfile.BinFile(filepath, f, blk_sz=16)
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
             s = bf.peek_byte(3)
             self.assertEqual(b'012', s)
@@ -113,9 +113,9 @@ class BinFileTest(unittest.TestCase):
 
     def test05(self):
         """Peek() first, then next(), mix them up."""
-        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
         with open(filepath, 'rb') as f:
-            bf = binfile.BinFile(filepath, f, blk_sz=16)
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
         
             cc2 = bf.peek_byte()
             self.assertEqual(ord('0'), cc2)
@@ -150,9 +150,9 @@ class BinFileTest(unittest.TestCase):
         
     def test06(self):
         """Test next_byte(3) and peek_byte(3) with a small buffer size"""
-        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
         with open(filepath, 'rb') as f:
-            bf = binfile.BinFile(filepath, f, blk_sz=16)
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
         
             cc = bf.next_byte()
             self.assertEqual(ord('0'), cc)
@@ -188,9 +188,9 @@ class BinFileTest(unittest.TestCase):
             
     def test07(self):
         """Test next_byte(3) and peek_byte(3) with a small buffer size"""
-        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
         with open(filepath, 'rb') as f:
-            bf = binfile.BinFile(filepath, f, blk_sz=16)
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
             # Peek before getting any byte
             cc = bf.peek_byte(1)
@@ -228,9 +228,9 @@ class BinFileTest(unittest.TestCase):
             
     def test08(self):
         """Multiple peeks() across the block boundary (by increasing next's)"""
-        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
         with open(filepath, 'rb') as f:
-            bf = binfile.BinFile(filepath, f, blk_sz=16)
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
             
             s = bf.next_byte(12)
             self.assertEqual(b'0123456789ab', s)
@@ -269,9 +269,9 @@ class BinFileTest(unittest.TestCase):
              
     def test09(self):
         """Multiple peeks() across the block boundary (by increasing peek's)"""
-        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
         with open(filepath, 'rb') as f:
-            bf = binfile.BinFile(filepath, f, blk_sz=16)
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
             
             s = bf.next_byte(12)
             self.assertEqual(b'0123456789ab', s)
@@ -293,9 +293,9 @@ class BinFileTest(unittest.TestCase):
            
     def test10(self):
         """Block size bigger than the file"""
-        filepath = os.path.join(BinFileTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
         with open(filepath, 'rb') as f:
-            bf = binfile.BinFile(filepath, f, blk_sz=64)
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=64)
             
             s = bf.peek_byte(3)
             self.assertEqual(b'012', s)

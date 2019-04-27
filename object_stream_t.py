@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-# objects_t.py
+# object_stream_t.py
 
 import os
 import unittest
-from objects import EObject, ObjStream
+from object_stream import EObject, ObjectStream
 
 #-------------------------------------------------------------------------------
 # I want stdout to be unbuffered, always
@@ -25,16 +25,16 @@ sys.stdout = Unbuffered(sys.stdout)
 # Tests
 # -----------------------------------------------------------------------------
 
-class ObjectsTest(unittest.TestCase):
+class ObjectStreamTest(unittest.TestCase):
     """Test the parsing of binary files."""
 
     path = r'D:\joao\src\py\pdf\t'
 
     def test01(self):
         """Test simple next_object() calls."""
-        filepath = os.path.join(ObjectsTest.path, 'obj_stream1.txt')
+        filepath = os.path.join(ObjectStreamTest.path, 'obj_stream1.txt')
         with open(filepath, 'rb') as f:
-            ob = ObjStream(filepath, f)
+            ob = ObjectStream(filepath, f)
 
             # Retrieve a few tokens
             obj = ob.next_object()
@@ -54,9 +54,9 @@ class ObjectsTest(unittest.TestCase):
 
     def test02(self):
         """Test nested arrays."""
-        filepath = os.path.join(ObjectsTest.path, 'obj_stream1.txt')
+        filepath = os.path.join(ObjectStreamTest.path, 'obj_stream1.txt')
         with open(filepath, 'rb') as f:
-            ob = ObjStream(filepath, f)
+            ob = ObjectStream(filepath, f)
 
             # Retrieve a few tokens
             obj = ob.next_object()
@@ -94,9 +94,9 @@ class ObjectsTest(unittest.TestCase):
 
     def test03(self):
         """Test nested dictionaries."""
-        filepath = os.path.join(ObjectsTest.path, 'obj_stream2.txt')
+        filepath = os.path.join(ObjectStreamTest.path, 'obj_stream2.txt')
         with open(filepath, 'rb') as f:
-            ob = ObjStream(filepath, f)
+            ob = ObjectStream(filepath, f)
 
             # Retrieve a few tokens
             obj = ob.next_object()

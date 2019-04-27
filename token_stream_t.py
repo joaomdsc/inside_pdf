@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-# tokener_t.py
+# token_stream_t.py
 
 import os
 import unittest
-from tokener import EToken, Tokener
+from token_stream import EToken, TokenStream
 
 #-------------------------------------------------------------------------------
 # I want stdout to be unbuffered, always
@@ -25,16 +25,16 @@ sys.stdout = Unbuffered(sys.stdout)
 # Tests
 # -----------------------------------------------------------------------------
 
-class TokenerTest(unittest.TestCase):
+class TokenStreamTest(unittest.TestCase):
     """Test the parsing of binary files."""
 
     path = r'D:\joao\src\py\pdf\t'
 
     def test01(self):
         """Test simple next_token() calls."""
-        filepath = os.path.join(TokenerTest.path, 'token_stream.txt')
+        filepath = os.path.join(TokenStreamTest.path, 'token_stream.txt')
         with open(filepath, 'rb') as f:
-            tk = Tokener(filepath, f)
+            tk = TokenStream(filepath, f)
 
             # Retrieve a few tokens
             tok = tk.next_token()

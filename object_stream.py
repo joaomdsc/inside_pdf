@@ -1,12 +1,11 @@
 #!/usr/bin/env python
-# objects.py - parse a stream of bytes into a stream of PDF spec tokens
+# object_stream.py - parse a stream of PDF spec objects from a stream of tokens
 
 import os
 import re
 import sys
 from enum import Enum, auto, unique
-import binfile
-from tokener import Tokener, EToken
+from token_stream import EToken, TokenStream
 
 #-------------------------------------------------------------------------------
 # I want stdout to be unbuffered, always
@@ -81,14 +80,14 @@ class PdfObject():
         return s
 
 #-------------------------------------------------------------------------------
-# class ObjStream
+# class ObjectStream
 #-------------------------------------------------------------------------------
 
-class ObjStream:
+class ObjectStream:
 
     # Initializer
     def __init__(self, filepath, f):
-        self.tk = Tokener(filepath, f)
+        self.tk = TokenStream(filepath, f)
         self.f = f
         self.tok = self.tk.next_token()
 

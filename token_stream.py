@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-# tokener.py - parse a stream of bytes into a stream of PDF spec tokens
+# token_stream.py - parse a stream of PDF spec tokens from a stream of bytes
 
 import os
 import re
 import sys
 from enum import Enum, auto, unique
-import binfile
+import byte_stream
 
 #-------------------------------------------------------------------------------
 # I want stdout to be unbuffered, always
@@ -103,10 +103,10 @@ Tokens are separated from each other by whitespace and/or delimiter characters.
         print(' '*4*indent + self.__str__())
         
 #-------------------------------------------------------------------------------
-# class Tokener
+# class TokenStream
 #-------------------------------------------------------------------------------
 
-class Tokener:
+class TokenStream:
     # Character classes
     wspace = b'\0\t\f '
     # wspace = b'\0\t\n\r\f '
@@ -115,7 +115,7 @@ class Tokener:
 
     # Initializer
     def __init__(self, filepath, f):
-        self.bf = binfile.BinFile(filepath, f)
+        self.bf = byte_stream.ByteStream(filepath, f)
         self.f = f
         self.cc = self.bf.next_byte()
         self.parens = 0
@@ -217,7 +217,7 @@ class Tokener:
                 # Each byte represents a hexadecimal digit, coded in ascii. If
                 # I decode it, the resulting string will be suitable for fromhex())
                 return bytes.fromhex(hs.decode())
-            elif cc in Tokener.hex_digit:
+            elif cc in TokenStream.hex_digit:
                 hs.append(cc)
             else:
                 # Incorrect value
@@ -235,13 +235,13 @@ class Tokener:
         name = bytearray()
         while True:
             cc = self.bf.next_byte()
-            if cc in Tokener.delims or cc in Tokener.wspace or cc in b'\r\n':
+            if cc in TokenStream.delims or cc in TokenStream.wspace or cc in b'\r\n':
                 break
             if cc == ord('#'):
                 # FIXME there may not be 2 characters left to read
                 # FIXME handle error case when hc has invalid characters
                 s = self.bf.peek_byte(2)
-                if s[0] in Tokener.hex_digit and s[1] in Tokener.hex_digit:
+                if s[0] in TokenStream.hex_digit and s[1] in TokenStream.hex_digit:
                     name += bytes.fromhex(s.decode())
                     self.bf.next_byte(2)
                 continue
@@ -269,7 +269,7 @@ class Tokener:
         cc = self.cc
         
         run = bytearray()
-        while (cc not in Tokener.delims and cc not in Tokener.wspace and
+        while (cc not in TokenStream.delims and cc not in TokenStream.wspace and
                    cc not in b'\r\n'):
             run.append(cc)
             cc = self.bf.next_byte()
@@ -334,7 +334,7 @@ class Tokener:
             return Token(EToken.EOF)
 
         # Start analyzing 
-        while cc in Tokener.wspace:
+        while cc in TokenStream.wspace:
             cc = self.bf.next_byte()
             if cc == -1:
                 return Token(EToken.EOF)
@@ -354,7 +354,7 @@ class Tokener:
                 # There's no byte to peek at
                 # FIXME this is an error situation
                 return -1
-            if cc2 in Tokener.hex_digit:
+            if cc2 in TokenStream.hex_digit:
                 # begin hex string
                 hs = self.get_hex_string()
                 # cc is on the closing 'greater than', call next_byte() so that

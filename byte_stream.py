@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# binfile.py - library to read binary files
+# byte_stream.py - read a stream of bytes from a binary file
 
 import io
 import os
@@ -22,10 +22,10 @@ import sys
 sys.stdout = Unbuffered(sys.stdout)
 
 #-------------------------------------------------------------------------------
-# class BinFile
+# class ByteStream
 #-------------------------------------------------------------------------------
 
-class BinFile:
+class ByteStream:
     
     def __init__(self, filepath, f, blk_sz=io.DEFAULT_BUFFER_SIZE):
         self.filepath = filepath
