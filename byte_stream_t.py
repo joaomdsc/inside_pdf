@@ -304,7 +304,78 @@ class ByteStreamTest(unittest.TestCase):
             self.assertEqual(b'0123456789ab', s)
             s = bf.peek_byte(3)
             self.assertEqual(b'cde', s)  # fully inside the first block
+           
+    def test11(self):
+        """Reading small streams."""
+        filepath = os.path.join(ByteStreamTest.path, 'blocks.dat')
+        with open(filepath, 'rb') as f:
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
+            s = bf.next_byte(3)
+            self.assertEqual(b'abc', s)
+
+            s = bf.next_stream(4)
+            self.assertEqual(b'defg', s)
+           
+    def test12(self):
+        """Reading large streams (greater than multiple block sizes)"""
+        filepath = os.path.join(ByteStreamTest.path, 'blocks.dat')
+        with open(filepath, 'rb') as f:
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
+
+            s = bf.next_byte(3)
+            self.assertEqual(b'abc', s)
+            s = bf.next_byte(9)
+            self.assertEqual(b'j01', s[6:])
+
+            s = bf.next_stream(40)
+            self.assertEqual(b'23456789ab', s[:10])
+            self.assertEqual(b'cdefghij01', s[30:])
+
+            s = bf.next_byte(3)
+            self.assertEqual(b'234', s)                             
+           
+    def test13(self):
+        """Reading large streams, testing boundary conditions 1"""
+        filepath = os.path.join(ByteStreamTest.path, 'blocks.dat')
+        with open(filepath, 'rb') as f:
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
+
+            s = bf.next_stream(80)
+            self.assertEqual(b'789', s[77:])
+            self.assertEqual(b'0123456789', s[30:40])
+           
+    def test14(self):
+        """Reading large streams, testing boundary conditions 2"""
+        filepath = os.path.join(ByteStreamTest.path, 'blocks.dat')
+        with open(filepath, 'rb') as f:
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
+
+            s = bf.next_byte(16)
+            s = bf.next_stream(5)
+            self.assertEqual(b'6789a', s)
+
+            s = bf.next_byte(4)
+            self.assertEqual(b'bcde', s)
+            s = bf.next_stream(3)
+            self.assertEqual(b'fgh', s)
+            
+            s = bf.next_byte(4)
+            self.assertEqual(b'ij01', s)
+            s = bf.next_stream(3)
+            self.assertEqual(b'234', s)
+           
+    def test15(self):
+        """Reading large streams, testing boundary conditions 3"""
+        filepath = os.path.join(ByteStreamTest.path, 'blocks.dat')
+        with open(filepath, 'rb') as f:
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
+
+            s = bf.peek_byte(2)
+            self.assertEqual(b'ab', s)
+            s = bf.next_stream(2)
+            self.assertEqual(b'ab', s)
+            
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
