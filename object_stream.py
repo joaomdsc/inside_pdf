@@ -30,8 +30,9 @@ sys.stdout = Unbuffered(sys.stdout)
 # Possible object types in PDF files
 @unique
 class EObject(Enum):
-    ERROR = auto()     # pseudo-object describing a parsing error 
-    EOF = auto()       # pseudo-object describing the EOF condition
+    ERROR = auto()          # pseudo-object describing a parsing error 
+    EOF = auto()            # pseudo-object describing the EOF condition
+    VERSION_MARKER = auto() # %PDF-n.m
     BOOLEAN = auto()
     INTEGER = auto()
     REAL = auto()
@@ -74,8 +75,12 @@ class PdfObject():
             for k, v in self.data.items():
                 s += f'({k}, {v}), '
             s += '}'
+        elif self.type == EObject.IND_OBJ_DEF:
+            s += f"{self.data['objn']} {self.data['gen']} {self.data['obj']}"
         elif self.type == EObject.IND_OBJ_REF:
             s += f"{self.data['objn']} {self.data['gen']} R"
+        elif self.type == EObject.VERSION_MARKER:
+            s += f'{self.data}'
         s += ')'
         return s
 
@@ -97,6 +102,26 @@ class ObjectStream:
         self.tok = self.tk.next_token()
       
     #---------------------------------------------------------------------------
+    # get_indirect_obj_def
+    #---------------------------------------------------------------------------
+ 
+    def get_indirect_obj_def(self):
+        """Found the opening OBJECT_BEGIN token, now get the entire object."""
+
+        tok = self.tok
+        obj = self.next_object()
+        tok = self.tok
+        if tok.type in [EToken.CR, EToken.LF, EToken.CRLF]:
+            # Ignore end-if-line markers
+            tok = self.tk.next_token()
+        if tok.type == EToken.OBJECT_END:
+            return obj
+        elif tok.type == EToken.EOF:
+            return PdfObject(EObject.EOF)
+        else:
+            return PdfObject(EObject.ERROR)
+      
+    #---------------------------------------------------------------------------
     # get_array
     #---------------------------------------------------------------------------
  
@@ -113,6 +138,10 @@ class ObjectStream:
             if tok.type == EToken.ARRAY_END:
                 # It's a python array, but the elements are PdfObjects
                 return PdfObject(EObject.ARRAY, arr)
+            if tok.type == EToken.ERROR:
+                return PdfObject(EObject.ERROR)
+            if tok.type == EToken.EOF:
+                return PdfObject(EObject.EOF)
             self.tok = tok
             obj = self.next_object()
             tok = self.tok
@@ -132,21 +161,22 @@ class ObjectStream:
         # Prepare a dictionary object
         d = {}
 
-        #=======================================================================
-        # FIXME line breaks inside a dictionary are not recognized
-        #=======================================================================
-
         tok = self.tk.next_token()
         while True:
             if tok.type == EToken.DICT_END:
                 # It's a python dictionary, but the values are PdfObjects
                 return PdfObject(EObject.DICTIONARY, d)
-            if tok.type == EToken.NAME:
+            if tok.type == EToken.ERROR:
+                return PdfObject(EObject.ERROR)
+            if tok.type == EToken.EOF:
+                return PdfObject(EObject.EOF)
+            if tok.type in [EToken.CR, EToken.LF, EToken.CRLF]:
+                # Ignore end-if-line markers
+                tok = self.tk.next_token()
+            elif tok.type == EToken.NAME:
                 tok2 = self.tk.next_token()
                 self.tok = tok2
                 obj = self.next_object()
-                # FIXME: what if there was some object it couldn't parse ?
-                # i.e. handle ERROR and EOF
                 # FIXME: can any bytes object be decoded like this ?
                 # FIXME: I've lost the keys' original bytes object
                 d[tok.data.decode('unicode_escape')] = obj            
@@ -154,8 +184,6 @@ class ObjectStream:
                 # The next token is already stored in self.tok, but it hasn't
                 # been analyzed yet.
                 tok = self.tok
-            elif tok.type in [EToken.CR, EToken.LF, EToken.CRLF]:
-                tok = self.tk.next_token()
             else:
                 return PdfObject(EObject.ERROR)
       
@@ -180,6 +208,9 @@ class ObjectStream:
             return PdfObject(EObject.EOF)
         elif tok.type == EToken.ERROR:
             return PdfObject(EObject.ERROR)
+        elif tok.type == EToken.VERSION_MARKER:
+            self.tok = self.tk.next_token()
+            return PdfObject(EObject.VERSION_MARKER, data=tok.data)
 
         # Now analyze tok: is it a boolean ?
         elif tok.type == EToken.TRUE:
@@ -210,7 +241,12 @@ class ObjectStream:
                     self.tk.next_token()  # peeked tok2
                     self.tk.next_token()  # peeked tok3
                     self.tok = self.tk.next_token()
-                    obj = self.next_object()
+                    # This does not work, I miss the endobj keyword. I do get
+                    # the next object - say, a dictionary - but that can be
+                    # followed by an end of line and the endobj keyword.
+                    obj = self.get_indirect_obj_def()
+                    if obj.type in [EObject.ERROR, EObject.EOF]:
+                        return obj
                     return PdfObject(EObject.IND_OBJ_DEF,
                                      data=dict(obj=obj, objn=tok.data, gen=tok2.data))
                 elif tok3.type == EToken.OBJ_REF:
@@ -251,6 +287,12 @@ class ObjectStream:
             obj = self.get_dictionary()
             self.tok = self.tk.next_token()
             return obj
+
+        # Is it a xref section ?
+        elif tok.type == EToken.XREF_SECTION:
+            print('xref')
+            self.tok = self.tk.next_token()
+            return PdfObject(EObject.INTEGER, data=0)
 
         # Is it a stream ? FIXME
 

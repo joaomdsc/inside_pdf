@@ -30,8 +30,8 @@ sys.stdout = Unbuffered(sys.stdout)
 # Possible token types in PDF files
 @unique
 class EToken(Enum):
-    ERROR = auto()     # pseudo-token describing a parsing error 
-    EOF = auto()       # pseudo-token describing the EOF condition
+    ERROR = auto()           # pseudo-token describing a parsing error 
+    EOF = auto()             # pseudo-token describing the EOF condition
     VERSION_MARKER = auto()  # %PDF-n.m
     EOF_MARKER = auto()      # %%EOF
     INTEGER = auto()
@@ -326,7 +326,7 @@ class TokenStream:
         # Invariant: cc has been read from the stream, but not yet analyzed. It
         # is stored (persisted in between calls) in self.cc. This means that
         # every time control leaves this function (through return), it must
-        # read, but not analyze, the next character, and store it in sefl.cc.
+        # read, but not analyze, the next character, and store it in self.cc.
         cc = self.cc
 
         # Have we reached EOF ?

@@ -371,10 +371,39 @@ class ByteStreamTest(unittest.TestCase):
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
+            # Start by peeking before getting the first byte  
+            s = bf.next_byte(2)
+            self.assertEqual(b'ab', s)
+            s = bf.peek_byte(2)
+            self.assertEqual(b'cd', s)
+            s = bf.next_stream(2)
+            self.assertEqual(b'cd', s)
+           
+    def test16(self):
+        """Reading large streams, testing boundary conditions 4"""
+        filepath = os.path.join(ByteStreamTest.path, 'blocks.dat')
+        with open(filepath, 'rb') as f:
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
+
+            # Start by peeking before getting the first byte  
             s = bf.peek_byte(2)
             self.assertEqual(b'ab', s)
             s = bf.next_stream(2)
             self.assertEqual(b'ab', s)
+           
+    def test17(self):
+        """Reading large streams, testing boundary conditions 5"""
+        filepath = os.path.join(ByteStreamTest.path, 'blocks.dat')
+        with open(filepath, 'rb') as f:
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
+
+            # Read an entire block before peeking
+            s = bf.next_byte(16)
+            self.assertEqual(b'45', s[14:])
+            s = bf.peek_byte(2)
+            self.assertEqual(b'67', s)
+            s = bf.next_stream(2)
+            self.assertEqual(b'67', s)
             
 
 if __name__ == '__main__':

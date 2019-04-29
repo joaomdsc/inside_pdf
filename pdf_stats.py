@@ -167,6 +167,7 @@ class XrefSection:
     # FIXME code a functional version of this
     def get_object(self, objn, gen):
         for subs in self.sub_sections:
+            # Return the first not None, or loop to the end
             o = subs.get_object(objn, gen)
             if o:
                 return o
@@ -192,6 +193,17 @@ def get_xref_section(f, offset):
     m = re.match(b'xref' + bEOL, line)
     if not m:
         # ignoring file: xref not found where expected from offset
+        print('xref keyword not found where expected')
+        # If version >= 1.5, the xref information may be found in a xref
+        # stream, which is a stream object:
+
+        # "Each cross-reference stream contains the information equivalent to
+        # the cross-reference table (see 7.5.4, "Cross-Reference Table") and
+        # trailer (see 7.5.5, "File Trailer") for one cross-reference section"
+
+        # So at this point I need to switch back to object parsing mode, and
+        # these functions need to be moved to object_stream.py.
+        
         return 0, False
 
     # Loop over cross-reference subsections
@@ -247,8 +259,13 @@ def get_indirect_object(o, ob, xref_sec):
     # this catalog dictionary object can be found; seek the file to
     # that offset, and do another ob.next_object()
 
+    # print(f"Getting object referred to by {o.data['objn']} {o.data['gen']}")
+
     # Catalog dictionary object is found at this offset, go there
-    offset, _, _ = xref_sec.get_object(o.data['objn'], o.data['gen'])
+    entry = xref_sec.get_object(o.data['objn'], o.data['gen'])
+    if not entry:
+        return None
+    offset, _, _ = entry
     ob.reset(offset)
 
     # Now read the next char, this will be the beginning of
@@ -271,14 +288,14 @@ def get_xref(filepath):
     offset = -1
     trailer = False
 
-    # print(f'get_xref: filepath={filepath}')
+    print(f'get_xref: filepath={filepath}')
     
     with FileReadBackwards(filepath) as f:
         # Last line
         line = f.readline()
         m = re.match('%%EOF' + EOL, line)
         if not m:
-            print('syntax error: no EOF marker')
+            print('syntax error: no EOF marker at the end of file')
 
         # Byte offset of last cross-reference section
         line = f.readline().rstrip()
@@ -290,17 +307,21 @@ def get_xref(filepath):
     # that sometimes I don't find one :-(
     
     with open(filepath, 'rb') as f:
-        # FIXME I should not be returning the 'line', 'f's state is all I need
+        # FIXME I should not be returning the 'line', 'f's state is all I
+        # need. This should probably be pushed down into object_stream or
+        # token_stream.
         xref_sec, line = get_xref_section(f, offset)
 
-        # Print out the cross reference table
-        print()
-        print('xref')
-        print(xref_sec)
+        # # Print out the cross reference table
+        # print()
+        # print('xref')
+        # print(xref_sec)
         
         # We've read some data into 'line', it's neither a sub-section header,
         # nor a xref entry. Need to analyze it further.
         trailer_follows = False
+        if not line:
+            print('line is None')
         m = re.match(b'trailer' + bEOL, line)
         if m:
             # Trailer immediately follows xref
@@ -324,6 +345,7 @@ def get_xref(filepath):
 
             # What we're really interested in, is the catalog dictionary for
             # the PDF document, which is in the Root key
+            # print(f'Accessing Root element in "{filepath}"')
             root = get_indirect_object(o.data['Root'], ob, xref_sec)
 
             # d is a python dictionary, but the items are PdfObjects

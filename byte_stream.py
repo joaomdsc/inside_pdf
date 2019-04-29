@@ -67,7 +67,7 @@ class ByteStream:
                 else:
                     self.buf = self.f.read(self.blk_sz)
                     if not self.buf:
-                        return -1                
+                        return -1
 
                 # Reset the index
                 self.i = 0
@@ -117,13 +117,23 @@ class ByteStream:
     def next_stream(self, length):
         """Get the next stream of 'length' bytes from the file."""
 
-        # If a next block has already been read from the file (after peeking
-        # beyong the current buffer) we ignore that, it will be read again.
-        self.peek_ahead = False
-        self.next_buf = b''
-
         # Number of bytes available in the current buffer
         available = len(self.buf) - self.i
+
+        # Have we reached the end of the current buffer ?
+        if available == 0:
+            # if peek_ahead is True, get next_buf, otherwise read a new one
+            if self.peek_ahead == True:
+                self.peek_ahead = False
+                self.buf = self.next_buf
+                self.next_buf = b''
+            else:
+                self.buf = self.f.read(self.blk_sz)
+                if not self.buf:
+                    return -1
+            # Reset the indexes
+            available = len(self.buf)
+            self.i = 0
 
         # Can we serve this request entirely form the current buffer ?
         if length <= available:
