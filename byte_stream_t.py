@@ -314,7 +314,7 @@ class ByteStreamTest(unittest.TestCase):
             s = bf.next_byte(3)
             self.assertEqual(b'abc', s)
 
-            s = bf.next_stream(4)
+            s = bf.next_byte(4)
             self.assertEqual(b'defg', s)
            
     def test12(self):
@@ -328,7 +328,7 @@ class ByteStreamTest(unittest.TestCase):
             s = bf.next_byte(9)
             self.assertEqual(b'j01', s[6:])
 
-            s = bf.next_stream(40)
+            s = bf.next_byte(40)
             self.assertEqual(b'23456789ab', s[:10])
             self.assertEqual(b'cdefghij01', s[30:])
 
@@ -341,7 +341,7 @@ class ByteStreamTest(unittest.TestCase):
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
-            s = bf.next_stream(80)
+            s = bf.next_byte(80)
             self.assertEqual(b'789', s[77:])
             self.assertEqual(b'0123456789', s[30:40])
            
@@ -352,17 +352,17 @@ class ByteStreamTest(unittest.TestCase):
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
             s = bf.next_byte(16)
-            s = bf.next_stream(5)
+            s = bf.next_byte(5)
             self.assertEqual(b'6789a', s)
 
             s = bf.next_byte(4)
             self.assertEqual(b'bcde', s)
-            s = bf.next_stream(3)
+            s = bf.next_byte(3)
             self.assertEqual(b'fgh', s)
             
             s = bf.next_byte(4)
             self.assertEqual(b'ij01', s)
-            s = bf.next_stream(3)
+            s = bf.next_byte(3)
             self.assertEqual(b'234', s)
            
     def test15(self):
@@ -376,7 +376,7 @@ class ByteStreamTest(unittest.TestCase):
             self.assertEqual(b'ab', s)
             s = bf.peek_byte(2)
             self.assertEqual(b'cd', s)
-            s = bf.next_stream(2)
+            s = bf.next_byte(2)
             self.assertEqual(b'cd', s)
            
     def test16(self):
@@ -388,7 +388,7 @@ class ByteStreamTest(unittest.TestCase):
             # Start by peeking before getting the first byte  
             s = bf.peek_byte(2)
             self.assertEqual(b'ab', s)
-            s = bf.next_stream(2)
+            s = bf.next_byte(2)
             self.assertEqual(b'ab', s)
            
     def test17(self):
@@ -402,21 +402,21 @@ class ByteStreamTest(unittest.TestCase):
             self.assertEqual(b'45', s[14:])
             s = bf.peek_byte(2)
             self.assertEqual(b'67', s)
-            s = bf.next_stream(2)
+            s = bf.next_byte(2)
             self.assertEqual(b'67', s)
             
-    def test18(self):
-        """Testing file pointer position"""
-        filepath = os.path.join(ByteStreamTest.path, 'blocks.dat')
-        with open(filepath, 'rb') as f:
-            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
+    # def test18(self):
+    #     """Testing file pointer position"""
+    #     filepath = os.path.join(ByteStreamTest.path, 'blocks.dat')
+    #     with open(filepath, 'rb') as f:
+    #         bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
-            # Before doing anything
-            self.assertEqual(bf.tell(), bf.file_pos())
+    #         # Before doing anything
+    #         self.assertEqual(bf.tell(), bf.file_pos())
 
-            # Read a few bytes
-            s = bf.next_byte(10)
-            self.assertEqual(bf.tell(), bf.file_pos())
+    #         # Read a few bytes
+    #         s = bf.next_byte(10)
+    #         self.assertEqual(bf.tell(), bf.file_pos())
            
 if __name__ == '__main__':
     unittest.main(verbosity=2)
