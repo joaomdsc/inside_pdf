@@ -31,6 +31,7 @@ class ByteStream:
         self.filepath = filepath
         self.f = f
         self.blk_sz = blk_sz
+        self.bytes_read = 0
         
         self.buf = b''  # normal
         self.i = 0
@@ -39,15 +40,27 @@ class ByteStream:
 
     def reset(self, offset):
         self.f.seek(offset)
+        self.bytes_read = offset
+        
         # Normal init
         self.buf = b''  # normal
         self.i = 0
         self.peek_ahead = False
         self.next_buf = b''  # when peek_ahead is True, use this as data source
         
-
     def close(self):
         self.f.close()
+
+    def file_pos(self):
+        return self.bytes_read + self.i
+
+    def tell(self):
+        return self.f.tell()
+
+    # FIXME Try this: forget about peeking. Implement proper tell() and seek()
+    # functions in byte_stream, and that's it. Want to back out at some point ?
+    # Assuming you called tell() at the right moment, just seek back to
+    # it. Much simpler.
         
     #---------------------------------------------------------------------------
     # next_byte
@@ -59,6 +72,7 @@ class ByteStream:
         for k in range(n):
             # Have we reached the end of the current buffer ?
             if self.i == len(self.buf):
+                self.bytes_read += len(self.buf)
                 # if peek_ahead is True, get next_buf, otherwise read a new one
                 if self.peek_ahead == True:
                     self.peek_ahead = False

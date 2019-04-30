@@ -405,7 +405,19 @@ class ByteStreamTest(unittest.TestCase):
             s = bf.next_stream(2)
             self.assertEqual(b'67', s)
             
+    def test18(self):
+        """Testing file pointer position"""
+        filepath = os.path.join(ByteStreamTest.path, 'blocks.dat')
+        with open(filepath, 'rb') as f:
+            bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
+            # Before doing anything
+            self.assertEqual(bf.tell(), bf.file_pos())
+
+            # Read a few bytes
+            s = bf.next_byte(10)
+            self.assertEqual(bf.tell(), bf.file_pos())
+           
 if __name__ == '__main__':
     unittest.main(verbosity=2)
 

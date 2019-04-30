@@ -59,6 +59,7 @@ class EToken(Enum):
     CR = auto()              # carriage return, \r, 0d
     LF = auto()              # newline, \n, 0a
     CRLF = auto()            # \r\n, 0d0a
+    SUBSECTION_HDR = auto()  # xref sub-section header 
 
     def __str__(self):
         """Print out 'NAME' instead of 'EToken.NAME'."""
@@ -268,41 +269,38 @@ class TokenStream:
         # the entire consecutive run of regular characters.
         cc = self.cc
         
-        run = bytearray()
+        s = bytearray()
         while (cc not in TokenStream.delims and cc not in TokenStream.wspace and
                    cc not in b'\r\n'):
-            run.append(cc)
+            s.append(cc)
             cc = self.bf.next_byte()
-        # cc now holds the first character not in 'run', still to be analyzed
-            
-        # FIXME am I sure this is ASCII ?
-        s = run.decode()
+        # cc now holds the first character not in 's', still to be analyzed
 
-        if s == 'true':
+        if s == b'true':
             t = Token(EToken.TRUE)
-        elif s == 'false':
+        elif s == b'false':
             t = Token(EToken.FALSE)
-        elif s == 'null':
+        elif s == b'null':
             t = Token(EToken.NULL)
-        elif s == 'obj':
+        elif s == b'obj':
             t = Token(EToken.OBJECT_BEGIN)
-        elif s == 'endobj':
+        elif s == b'endobj':
             t = Token(EToken.OBJECT_END)
-        elif s == 'stream':
+        elif s == b'stream':
             t = Token(EToken.STREAM_BEGIN)
             # PDF Spec, § 7.3.8.1, page 19 :"The keyword stream that follows
             # the stream dictionary shall be followed by an end-of-line marker
             # consisting of either a CARRIAGE RETURN and a LINE FEED or just a
             # LINE FEED, and not by a CARRIAGE RETURN alone."
-        elif s == 'endstream':
+        elif s == b'endstream':
             t = Token(EToken.STREAM_END)
-        elif s == 'R':
+        elif s == b'R':
             t = Token(EToken.OBJ_REF)
-        elif s == 'xref':
+        elif s == b'xref':
             t = Token(EToken.XREF_SECTION)
-        elif s == 'trailer':
+        elif s == b'trailer':
             t = Token(EToken.TRAILER)
-        elif s == 'startxref':
+        elif s == b'startxref':
             t = Token(EToken.STARTXREF)
         else:
             try:
@@ -485,6 +483,75 @@ class TokenStream:
         tok = self._next_token()
         self.peeked.append(tok)
         return tok
+      
+    #---------------------------------------------------------------------------
+    # get_subsection_header
+    #---------------------------------------------------------------------------
+ 
+    # Pdf spec: "The subsection shall begin with a line containing two numbers
+    # separated by a SPACE (20h), denoting the object number of the first
+    # object in this subsection and the number of entries in the subsection."
+
+    def get_subsection_header(self):
+        """Parse a subsection header at this point in the stream."""
+        # Typically the previous token that was read was an EOL marker
+        # I should probably verify the same invariant as next_token(). self.cc
+        # holds the next character following the EOL marker.
+        cc = self.cc
+
+        # Save state in case we rollback
+        save_cc = self.cc
+        bytes_peeked = 0
+
+        # Get the first integer (first_objn), cf. get_regular_run())
+        s = bytearray()
+        while cc not in TokenStream.wspace:  # FIXME this is not robust enough
+            s.append(cc)
+            cc = self.bf.peek_byte()
+            bytes_peeked += 1
+            
+        try:
+            first_objn = int(s)
+        except ValueError:
+            # This could be an actual syntax error in the file, or it could be
+            # that we reached the end of the last subsection, and the data
+            # we've been reading is actually whatever follows the xref section.
+
+            # Restore state
+            self.cc = save_cc
+            return Token(EToken.ERROR, f"Couldn't parse integer from '{s}'")
+
+        # Move over the single space
+        cc = self.bf.peek_byte()
+        bytes_peeked += 1
+
+        # Get the second integer (entry_cnt), cf. get_regular_run())
+        s = bytearray()
+        while cc not in [ord('\r'), ord('\n')]:
+            s.append(cc)
+            cc = self.bf.peek_byte()
+            bytes_peeked += 1
+
+        try:
+            entry_cnt = int(s)
+        except ValueError:
+            # This could be an actual syntax error in the file, or it could be
+            # that we reached the end of the last subsection, and the data
+            # we've been reading is actually whatever follows the xref section.
+
+            # Restore state
+            self.cc = save_cc
+            return Token(EToken.ERROR, f"Couldn't parse integer from '{s}'")
+
+        # At this point, cc is \r or \n, get the EOL marker
+        self.cc = cc
+
+        # This returns CRLF, CR, or LF, if the file is correct, and self.cc
+        # holds the next non-analyzed character.
+        tok = self.next_token()
+        if tok.type == EToken.ERROR or tok.type == EToken.EOF:
+            return tok
+        return Token(EToken.SUBSECTION_HDR, (first_objn, entry_cnt))
 
 #-------------------------------------------------------------------------------
 # main

@@ -26,7 +26,7 @@ sys.stdout = Unbuffered(sys.stdout)
 # -----------------------------------------------------------------------------
 
 class ObjectStreamTest(unittest.TestCase):
-    """Test the parsing of binary files."""
+    """Test the parsing of pdf objects in pdf files."""
 
     path = r'D:\joao\src\py\pdf\t'
 
@@ -138,6 +138,8 @@ class ObjectStreamTest(unittest.TestCase):
             y = x.data['nice']
             self.assertEqual(EObject.REAL, y.type)
             self.assertEqual(1.0, y.data)
+
+    # FIXME test arrays with embedded end-of-lines
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

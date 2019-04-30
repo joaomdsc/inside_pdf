@@ -7,6 +7,9 @@ import sys
 from enum import Enum, auto, unique
 from token_stream import EToken, TokenStream
 
+bEOL = b'(\r\n|\r|\n)'
+bEOLSP = b'(\r\n| \r| \n)'
+
 #-------------------------------------------------------------------------------
 # I want stdout to be unbuffered, always
 #-------------------------------------------------------------------------------
@@ -44,6 +47,7 @@ class EObject(Enum):
     NULL = auto()
     IND_OBJ_DEF = auto()    # indirect object definition
     IND_OBJ_REF = auto()    # indirect object reference
+    XREF_SECTION = auto()   # cross reference section
 
     def __str__(self):
         """Print out 'NAME' instead of 'EToken.NAME'."""
@@ -65,6 +69,10 @@ class PdfObject():
             s += f'{self.data}'
         elif self.type == EObject.STRING or self.type == EObject.NAME:
             s += self.data[:len(self.data)].decode('unicode_escape')
+        elif self.type == EObject.IND_OBJ_DEF:
+            s += f"{self.data['objn']} {self.data['gen']} {self.data['obj']}"
+        elif self.type == EObject.IND_OBJ_REF:
+            s += f"{self.data['objn']} {self.data['gen']} R"
         elif self.type == EObject.ARRAY:
             s += '['
             for x in self.data:
@@ -75,13 +83,65 @@ class PdfObject():
             for k, v in self.data.items():
                 s += f'({k}, {v}), '
             s += '}'
-        elif self.type == EObject.IND_OBJ_DEF:
-            s += f"{self.data['objn']} {self.data['gen']} {self.data['obj']}"
-        elif self.type == EObject.IND_OBJ_REF:
-            s += f"{self.data['objn']} {self.data['gen']} R"
+        elif self.type == EObject.XREF_SECTION:
+            xref_sec = self.data
+            s += f'{len(xref_sec.sub_sections)}'
         elif self.type == EObject.VERSION_MARKER:
             s += f'{self.data}'
         s += ')'
+        return s
+
+#-------------------------------------------------------------------------------
+# class XrefSubSection - represent a sub-section of a cross-reference table
+#-------------------------------------------------------------------------------
+
+class XrefSubSection:
+    """Represent a sub-section of a xref section."""
+    def __init__(self, first_objn, entry_cnt):
+        self.first_objn = first_objn
+        self.entry_cnt = entry_cnt
+        self.entries = []  # each entry is a 3-tuple (x, gen, in_use)
+
+    def has_object(self, objn, gen):
+        return self.first_objn <= objn < self.first_objn + self.entry_cnt
+
+    def get_object(self, objn, gen):
+        if self.has_object(objn, gen):
+            return self.entries[objn - self.first_objn]
+        else:
+            return None
+
+    def __str__(self):
+        s = f'{self.first_objn} {self.entry_cnt}\n'
+        for (x, gen, in_use) in self.entries:
+            s += f'{x} {gen} {in_use}\n'
+        return s
+
+#-------------------------------------------------------------------------------
+# class XrefSection - represent a cross-reference section
+#-------------------------------------------------------------------------------
+
+# The xref table comprises one or more cross-reference sections
+
+class XrefSection:
+    """Represent a cross-reference section in a PDF file xref table."""
+    def __init__(self):
+        # Sub-sections are not sorted
+        self.sub_sections = []
+
+    # FIXME code a functional version of this
+    def get_object(self, objn, gen):
+        for subs in self.sub_sections:
+            # Return the first not None, or loop to the end
+            o = subs.get_object(objn, gen)
+            if o:
+                return o
+        return None
+
+    def __str__(self):
+        s = ''
+        for subs in self.sub_sections:
+            s += str(subs)
         return s
 
 #-------------------------------------------------------------------------------
@@ -95,6 +155,8 @@ class ObjectStream:
         self.tk = TokenStream(filepath, f)
         self.f = f
         self.tok = self.tk.next_token()
+
+        # The xref table will be a property of the object stream ?
 
     def reset(self, offset):
         self.tk.reset(offset)
@@ -127,11 +189,14 @@ class ObjectStream:
  
     def get_array(self):
         """Found the opening ARRAY_BEGIN token, now get the entire array."""
+        # self.tok has a EToken.ARRAY_BEGIN, parse the following tokens.
         # Arrays can hold any kind of objects, including other arrays and
         # dictionaries.
 
         # Prepare an array object
         arr = []
+
+        # FIXME shouldn't I ignore end-of-line characters ?
 
         tok = self.tk.next_token()
         while True:
@@ -155,6 +220,7 @@ class ObjectStream:
  
     def get_dictionary(self):
         """Found the opening DICT_BEGIN token, now get the entire dictionary."""
+        # self.tok has a EToken.DICT_BEGIN, parse the following tokens.
         # Dictionaries are sets of (key, value) pairs, where the value can be
         # any kind of object, including arrays and other dictionaries.
 
@@ -170,8 +236,8 @@ class ObjectStream:
                 return PdfObject(EObject.ERROR)
             if tok.type == EToken.EOF:
                 return PdfObject(EObject.EOF)
+            # Ignore end-if-line markers
             if tok.type in [EToken.CR, EToken.LF, EToken.CRLF]:
-                # Ignore end-if-line markers
                 tok = self.tk.next_token()
             elif tok.type == EToken.NAME:
                 tok2 = self.tk.next_token()
@@ -186,6 +252,83 @@ class ObjectStream:
                 tok = self.tok
             else:
                 return PdfObject(EObject.ERROR)
+
+    #---------------------------------------------------------------------------
+    # get_xref_section - when we are given its offset in the file
+    #---------------------------------------------------------------------------
+    # There are two types of xref sections that may be found in a pdf file, and
+    # two ways of finding them:
+    #
+    #   - read from the end, got to offset, find either the 'xref' keyword, or
+    #     an object definition (which denotes a xref stream)
+    #
+    #   - parse the file sequentially, get a 'xref' token or object definition.
+    #     This what is implemented below.
+    #---------------------------------------------------------------------------
+
+    def get_xref_section(self):
+        """Parse a cross reference section into an object"""
+        # self.tok has a EToken.XREF_SECTION, parse the following tokens.
+        tok = self.tk.next_token()
+
+        # Ignore end-if-line markers
+        if tok.type in [EToken.CR, EToken.LF, EToken.CRLF]:
+            # Don't do this... next_token() will return an INTEGER because it
+            # lacks the context
+            tok = self.tk.next_token()
+            
+        # Loop over cross-reference subsections
+        xref_sec = XrefSection()
+        while True:
+            # "The line terminator is always b'\n' for binary files", so says
+            # the Python Std Library doc. So it's not safe to use readline().
+            line = self.f.readline()
+
+            # I have 2 things to fix: need to implement my own tell() (and
+            # rename reset() as seek(), btw); need to read these lines with my
+            # token_/byte_stream stack.
+            if line == b'':
+                return PdfObject(EObject.EOF)
+
+            # Each cross-reference subsection shall contain entries for a
+            # contiguous range of object numbers. The subsection shall begin
+            # with a line containing two numbers separated by a SPACE (20h),
+            # denoting the object number of the first object in this subsection
+            # and the number of entries in the subsection.
+            # Ask the token_stream module for this information
+            tok = self.tk.get_subsection_header()
+            if tok.type == EToken.ERROR:
+                return PdfObject(EObject.ERROR)
+            if tok.type == EToken.EOF:
+                return PdfObject(EObject.EOF)
+            if not m:
+                # We're returning here because we found a line that doesn't
+                # match the beginning of a xref sub-section (this is the
+                # equivalent of finding a _END token). We undo the last
+                # readline so we can resume parsing normally.
+                self.xref_sec = xref_sec
+                self.reset(fpos)
+                print(xref_sec)
+                return PdfObject(EObject.XREF_SECTION, xref_sec)
+            first_objn = int(m.group(1))
+            entry_cnt = int(m.group(2))
+
+            # I'm assuming entry_cnt is not 0.
+            subs = XrefSubSection(first_objn, entry_cnt)
+            for i in range(entry_cnt):
+                fpos = self.f.tell()
+                line = self.f.readline()
+                pat = b'(\d{10}) (\d{5}) ([nf])' + bEOLSP
+                m = re.match(pat, line)
+                if not m:
+                    # I know the entry count, this should never happen
+                    return PdfObject(EObject.ERROR)
+                x = int(m.group(1))  # offset, if in_use, or object number if free
+                gen = int(m.group(2))
+                in_use = m.group(3) == b'n'
+                subs.entries.append((x, gen, in_use))
+            # Finish off the this sub-section
+            xref_sec.sub_sections.append(subs)
       
     #---------------------------------------------------------------------------
     # next_object
@@ -290,9 +433,9 @@ class ObjectStream:
 
         # Is it a xref section ?
         elif tok.type == EToken.XREF_SECTION:
-            print('xref')
+            obj = self.get_xref_section()
             self.tok = self.tk.next_token()
-            return PdfObject(EObject.INTEGER, data=0)
+            return obj
 
         # Is it a stream ? FIXME
 

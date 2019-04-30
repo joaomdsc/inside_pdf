@@ -5,7 +5,7 @@ import os
 import re
 import sys
 from file_read_backwards import FileReadBackwards
-from object_stream import EObject, ObjectStream
+from object_stream import EObject, XrefSection, ObjectStream
 
 EOL = '(\r\n|\r|\n)'
 bEOL = b'(\r\n|\r|\n)'
@@ -127,61 +127,10 @@ def get_trailer(filepath):
     return trailer, offset
 
 #-------------------------------------------------------------------------------
-# XrefSubSection - represent a sub-section of a cross-reference table
-#-------------------------------------------------------------------------------
-
-class XrefSubSection:
-    """Represent a sub-section of a xref section."""
-    def __init__(self, first_objn, entry_cnt):
-        self.first_objn = first_objn
-        self.entry_cnt = entry_cnt
-        self.entries = []  # each entry is a 3-tuple (x, gen, in_use)
-
-    def has_object(self, objn, gen):
-        return self.first_objn <= objn < self.first_objn + self.entry_cnt
-
-    def get_object(self, objn, gen):
-        if self.has_object(objn, gen):
-            return self.entries[objn - self.first_objn]
-        else:
-            return None
-
-    def __str__(self):
-        s = f'{self.first_objn} {self.entry_cnt}\n'
-        for (x, gen, in_use) in self.entries:
-            s += f'{x} {gen} {in_use}\n'
-        return s
-
-#-------------------------------------------------------------------------------
-# XrefSection - represent a cross-reference section
-#-------------------------------------------------------------------------------
-
-# The xref table comprises one or more cross-reference sections
-
-class XrefSection:
-    """Represent a cross-reference section in a PDF file xref table."""
-    def __init__(self):
-        # Sub-sections are not sorted
-        self.sub_sections = []
-
-    # FIXME code a functional version of this
-    def get_object(self, objn, gen):
-        for subs in self.sub_sections:
-            # Return the first not None, or loop to the end
-            o = subs.get_object(objn, gen)
-            if o:
-                return o
-        return None
-
-    def __str__(self):
-        s = ''
-        for subs in self.sub_sections:
-            s += str(subs)
-        return s
-
-#-------------------------------------------------------------------------------
 # get_xref_section - when we are given its offset in the file
 #-------------------------------------------------------------------------------
+
+# FIXME move this to object_stream.py. Reset the stream to offset then parse.
 
 def get_xref_section(f, offset):
     f.seek(offset)
@@ -244,10 +193,10 @@ def get_xref_section(f, offset):
     return xref_sec, line  # FIXME
 
 #-------------------------------------------------------------------------------
-# get_indirect_object - read an indirect object from the file
+# deref_object - read an indirect object from the file
 #-------------------------------------------------------------------------------
 
-def get_indirect_object(o, ob, xref_sec):
+def deref_object(o, ob, xref_sec):
     # FIXME make this a method of ObjStream, perhaps ? to get the right context ?
     """Read a dictionary, return it as a python dict with PdfObject values."""
     if o.type != EObject.IND_OBJ_REF:
@@ -284,12 +233,17 @@ def get_indirect_object(o, ob, xref_sec):
 #-------------------------------------------------------------------------------
 
 def get_xref(filepath):
-    """Extract the xref table."""
+    """Extract the xref table that is found from the file trailer."""
+    # This code does not support any context. It opens its own files, and
+    # doesn't need to worry about returning a proper state.
     offset = -1
     trailer = False
 
     print(f'get_xref: filepath={filepath}')
-    
+
+    # "The line terminator is always b'\n' for binary files", so says the
+    # Python Std Library doc. It's really not a good idea to use readline()
+
     with FileReadBackwards(filepath) as f:
         # Last line
         line = f.readline()
@@ -346,7 +300,7 @@ def get_xref(filepath):
             # What we're really interested in, is the catalog dictionary for
             # the PDF document, which is in the Root key
             # print(f'Accessing Root element in "{filepath}"')
-            root = get_indirect_object(o.data['Root'], ob, xref_sec)
+            root = deref_object(o.data['Root'], ob, xref_sec)
 
             # d is a python dictionary, but the items are PdfObjects
             d = root.data
@@ -355,20 +309,13 @@ def get_xref(filepath):
                 print(f'    {k}: {v}')
 
             # Next we're interested in the Info dictionary
-            info = get_indirect_object(o.data['Info'], ob, xref_sec)
+            info = deref_object(o.data['Info'], ob, xref_sec)
 
             # d is a python dictionary, but the items are PdfObjects
             d = info.data
             print(f"Information dictionary: {filepath.split(';')[0]}")
             for k, v in d.items():
                 print(f'    {k}: {v}')
-
-        # # Print out what we found
-        # for s in xref_section:
-        #     for e in sub_section:
-        #         (objn, x, gen, in_use) = e
-        #         print(f'{objn}, {x}, {gen}, {in_use}')
-        #     print()
 
         return len(xref_sec.sub_sections), trailer_follows
         
