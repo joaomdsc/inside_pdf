@@ -127,72 +127,6 @@ def get_trailer(filepath):
     return trailer, offset
 
 #-------------------------------------------------------------------------------
-# get_xref_section - when we are given its offset in the file
-#-------------------------------------------------------------------------------
-
-# FIXME move this to object_stream.py. Reset the stream to offset then parse.
-
-def get_xref_section(f, offset):
-    f.seek(offset)
-    line = f.readline()
-    # FIXME shouldn't this be handled by the tokener ?
-
-    # Each cross-reference section shall begin with a line containing the
-    # keyword xref.
-    m = re.match(b'xref' + bEOL, line)
-    if not m:
-        # ignoring file: xref not found where expected from offset
-        print('xref keyword not found where expected')
-        # If version >= 1.5, the xref information may be found in a xref
-        # stream, which is a stream object:
-
-        # "Each cross-reference stream contains the information equivalent to
-        # the cross-reference table (see 7.5.4, "Cross-Reference Table") and
-        # trailer (see 7.5.5, "File Trailer") for one cross-reference section"
-
-        # So at this point I need to switch back to object parsing mode, and
-        # these functions need to be moved to object_stream.py.
-        
-        return 0, False
-
-    # Loop over cross-reference subsections
-    xref_sec = XrefSection()
-    while True:
-        line = f.readline()
-        if line == b'':  # EOF ?
-            break
-
-        # Each cross-reference subsection shall contain entries for a
-        # contiguous range of object numbers. The subsection shall begin
-        # with a line containing two numbers separated by a SPACE (20h),
-        # denoting the object number of the first object in this subsection
-        # and the number of entries in the subsection.
-        m = re.match(b'(\d+) (\d+)' + bEOL, line)
-        if not m:
-            # No more sub-sections, but what is in 'line' ? Don't know yet
-            break
-        first_objn = int(m.group(1))
-        entry_cnt = int(m.group(2))
-
-        # I'm assuming entry_cnt is not 0.
-        subs = XrefSubSection(first_objn, entry_cnt)
-        for i in range(entry_cnt):
-            line = f.readline()
-            pat = b'(\d{10}) (\d{5}) ([nf])' + bEOLSP
-            m = re.match(pat, line)
-            if not m:
-                # I know the entry count, this should never happen
-                raise ValueError(f'Error: found "{line}" instead of a xref entry')
-            x = int(m.group(1))  # offset, if in_use, or object number if free
-            gen = int(m.group(2))
-            in_use = m.group(3) == b'n'
-            subs.entries.append((x, gen, in_use))
-        # Finish off the this sub-section
-        xref_sec.sub_sections.append(subs)
-
-    return xref_sec, line  # FIXME
-
-#-------------------------------------------------------------------------------
 # deref_object - read an indirect object from the file
 #-------------------------------------------------------------------------------
 
@@ -215,7 +149,7 @@ def deref_object(o, ob, xref_sec):
     if not entry:
         return None
     offset, _, _ = entry
-    ob.reset(offset)
+    ob.seek(offset)
 
     # Now read the next char, this will be the beginning of
     # "6082 0 obj^M<</Metadata 6125 0 R ..." where 6082 is the objn
@@ -261,32 +195,28 @@ def get_xref(filepath):
     # that sometimes I don't find one :-(
     
     with open(filepath, 'rb') as f:
-        # FIXME I should not be returning the 'line', 'f's state is all I
-        # need. This should probably be pushed down into object_stream or
-        # token_stream.
-        xref_sec, line = get_xref_section(f, offset)
+        ob = ObjectStream(filepath, f)
+        ob.seek(offset)
+        o = ob.get_xref_section()
+        xref_sec = o.data
 
         # # Print out the cross reference table
         # print()
         # print('xref')
         # print(xref_sec)
         
-        # We've read some data into 'line', it's neither a sub-section header,
-        # nor a xref entry. Need to analyze it further.
+        # What comes after the cross reference section ?
         trailer_follows = False
-        if not line:
-            print('line is None')
-        m = re.match(b'trailer' + bEOL, line)
-        if m:
+        o = ob.next_object()
+        if o.type == EObject.TRAILER:
             # Trailer immediately follows xref
             trailer_follows = True
 
-            # We now expect the trailer dictionary
-            ob = ObjectStream(filepath, f)
-            o = ob.next_object()
+            # Now get the trailer dictionary
+            o = o.data
             if o.type != EObject.DICTIONARY:
-                print('Syntax error, incorrect trailer dict')
-                return (len(xref_sec), trailer_follows)
+                print("Error: trailer doesn't have a dictionary")
+                return (len(xref_sec.sub_sections), trailer_follows)
 
             # # Need to read the Prev key first, otherwise we don't have all the
             # # cross-references

@@ -5,7 +5,9 @@ import os
 import re
 import sys
 from enum import Enum, auto, unique
-import byte_stream
+from byte_stream import ByteStream
+
+bEOLSP = b'(\r\n| \r| \n)'
 
 #-------------------------------------------------------------------------------
 # I want stdout to be unbuffered, always
@@ -30,36 +32,38 @@ sys.stdout = Unbuffered(sys.stdout)
 # Possible token types in PDF files
 @unique
 class EToken(Enum):
-    ERROR = auto()           # pseudo-token describing a parsing error 
-    EOF = auto()             # pseudo-token describing the EOF condition
-    VERSION_MARKER = auto()  # %PDF-n.m
-    EOF_MARKER = auto()      # %%EOF
+    ERROR = auto()             # pseudo-token describing a parsing error 
+    EOF = auto()               # pseudo-token describing the EOF condition
+    VERSION_MARKER = auto()    # %PDF-n.m
+    EOF_MARKER = auto()        # %%EOF
     INTEGER = auto()
     REAL = auto()
     # I'm not sure I need to distinguish the next 2 tokens. Maybe just knowing
     # that it's a string will turn out to be enough.
-    LITERAL_STRING = auto()  # (xxxxx) FIXME maybe a single STRING token ?
-    HEX_STRING = auto()      # <xxxxx>
-    NAME = auto()            # /xxxxx
-    ARRAY_BEGIN = auto()     # '['
-    ARRAY_END = auto()       # ']'
-    DICT_BEGIN = auto()      # '<<'
-    DICT_END = auto()        # '>>'
-    TRUE = auto()            # true
-    FALSE = auto()           # false
-    NULL = auto()            # null
-    OBJECT_BEGIN = auto()    # obj
-    OBJECT_END = auto()      # endobj
-    STREAM_BEGIN = auto()    # stream
-    STREAM_END = auto()      # endstream
-    OBJ_REF = auto()         # 'R'
-    XREF_SECTION = auto()    # xref
-    TRAILER = auto()         # trailer
-    STARTXREF = auto()       # startxref
-    CR = auto()              # carriage return, \r, 0d
-    LF = auto()              # newline, \n, 0a
-    CRLF = auto()            # \r\n, 0d0a
-    SUBSECTION_HDR = auto()  # xref sub-section header 
+    LITERAL_STRING = auto()    # (xxxxx) FIXME maybe a single STRING token ?
+    HEX_STRING = auto()        # <xxxxx>
+    NAME = auto()              # /xxxxx
+    ARRAY_BEGIN = auto()       # '['
+    ARRAY_END = auto()         # ']'
+    DICT_BEGIN = auto()        # '<<'
+    DICT_END = auto()          # '>>'
+    TRUE = auto()              # true
+    FALSE = auto()             # false
+    NULL = auto()              # null
+    OBJECT_BEGIN = auto()      # obj
+    OBJECT_END = auto()        # endobj
+    STREAM_BEGIN = auto()      # stream
+    STREAM_END = auto()        # endstream
+    OBJ_REF = auto()           # 'R'
+    XREF_SECTION = auto()      # xref
+    TRAILER = auto()           # trailer
+    STARTXREF = auto()         # startxref
+    CR = auto()                # carriage return, \r, 0d
+    LF = auto()                # newline, \n, 0a
+    CRLF = auto()              # \r\n, 0d0a
+    SUBSECTION_HDR = auto()    # xref sub-section header
+    SUBSECTION_ENTRY = auto()  # xref sub-section entry
+    UNEXPECTED = auto()        # asked for a header, got something else
 
     def __str__(self):
         """Print out 'NAME' instead of 'EToken.NAME'."""
@@ -116,14 +120,14 @@ class TokenStream:
 
     # Initializer
     def __init__(self, filepath, f):
-        self.bf = byte_stream.ByteStream(filepath, f)
+        self.bf = ByteStream(filepath, f)
         self.f = f
         self.cc = self.bf.next_byte()
         self.parens = 0
         self.peeked = []
 
-    def reset(self, offset):
-        self.bf.reset(offset)
+    def seek(self, offset):
+        self.bf.seek(offset)
         # Normal init
         self.cc = self.bf.next_byte()
         self.parens = 0
@@ -153,44 +157,47 @@ class TokenStream:
                 ls.append(cc)
             elif cc == ord('\\'):
                 # Escape sequences
-                cc2 = self.bf.peek_byte()
+                pos = self.bf.tell()
+                cc2 = self.bf.next_byte()
                 if cc2 == ord('n'):
                     ls.append(ord('\n'))
-                    self.bf.next_char()
+                    self.bf.next_byte()
                 elif cc2 == ord('r'):
                     ls.append(ord('\r'))
-                    self.bf.next_char()
+                    self.bf.next_byte()
                 elif cc2 == ord('t'):
                     ls.append(ord('\t'))
-                    self.bf.next_char()
+                    self.bf.next_byte()
                 elif cc2 == ord('b'):
                     ls.append(ord('\b'))
-                    self.bf.next_char()
+                    self.bf.next_byte()
                 elif cc2 == ord('f'):
                     ls.append(ord('\f'))
-                    self.bf.next_char()
+                    self.bf.next_byte()
                 elif cc2 == ord('('):
                     ls.append(ord('('))
-                    self.bf.next_char()
+                    self.bf.next_byte()
                 elif cc2 == ord(')'):
                     ls.append(ord(')'))
-                    self.bf.next_char()
+                    self.bf.next_byte()
                 elif cc2 == ord('\\'):
                     ls.append(ord('\\'))
-                    self.bf.next_char()
+                    self.bf.next_byte()
                 else:
-                    # peek may fail if there are less than 3 characters in the
-                    # stream. In that case, the backslash should be ignored,
-                    # and the following character(s) read.
-                    s = self.bf.peek_byte(3)
+                    # next_byte may fail if there are less than 3 characters in
+                    # the stream. In that case, the backslash should be
+                    # ignored, and the following character(s) read.
+                    self.bf.seek(pos)
+                    s = self.bf.next_byte(3)
                     try:
                         c = int(s, 8)
                         ls.append(c)
-                        self.bf.next_char(3)
+                        self.bf.next_byte(3)
                     except ValueError as e:
                         # Backslash was not followed by one of the expected
                         # characters, just ignore it. The character following
                         # the backslash wasn't read.
+                        # FIXME this error case is not handled
                         print(error)
             else:
                 # All other characters just get added to the string
@@ -241,10 +248,12 @@ class TokenStream:
             if cc == ord('#'):
                 # FIXME there may not be 2 characters left to read
                 # FIXME handle error case when hc has invalid characters
-                s = self.bf.peek_byte(2)
+                pos = self.bf.tell()  # useless ?
+                s = self.bf.next_byte(2)
                 if s[0] in TokenStream.hex_digit and s[1] in TokenStream.hex_digit:
                     name += bytes.fromhex(s.decode())
-                    self.bf.next_byte(2)
+                else:
+                    print('error')
                 continue
             if cc < 33 or cc > 126:
                 # Cf. PDF Spec 1.7 page 17
@@ -309,9 +318,15 @@ class TokenStream:
                 try:
                     t = Token(EToken.REAL, float(s))
                 except ValueError:
+                    # cc has been read from the stream, but not yet
+                    # analyzed. It is stored (persisted in between calls) in
+                    # self.cc
                     self.cc = cc
                     return Token(EToken.ERROR,
-                                 "Unrecognized regular character run.")              
+                                 "Unrecognized regular character run.")
+                
+        # cc has been read from the stream, but not yet analyzed. It is stored
+        # (persisted in between calls) in self.cc
         self.cc = cc
         return t
       
@@ -347,13 +362,14 @@ class TokenStream:
             self.cc = self.bf.next_byte()
             return Token(EToken.LITERAL_STRING, ls)
         elif cc == ord('<'):
-            cc2 = self.bf.peek_byte()
+            pos = self.bf.tell()
+            cc2 = self.bf.next_byte()
             if cc2 == -1:
-                # There's no byte to peek at
-                # FIXME this is an error situation
-                return -1
+                # There's no byte to read
+                return EToken.EOF
             if cc2 in TokenStream.hex_digit:
                 # begin hex string
+                self.bf.seek(pos)  # FIXME or I could pass on cc2
                 hs = self.get_hex_string()
                 # cc is on the closing 'greater than', call next_byte() so that
                 # when we return, cc is the next not-yet-analyzed byte.
@@ -361,7 +377,6 @@ class TokenStream:
                 return Token(EToken.HEX_STRING, hs)
             elif cc2 == ord('<'):
                 # begin dictionary
-                self.bf.next_byte()  # move input stream forward, past peeked char
                 self.cc = self.bf.next_byte()  # next byte to analyze
                 return Token(EToken.DICT_BEGIN)
             else:
@@ -371,14 +386,13 @@ class TokenStream:
                 return Token(EToken.ERROR,
                              "error: '<' not followed by hex digit or second '<'")
         elif cc == ord('>'):
-            cc2 = self.bf.peek_byte()
+            pos = self.bf.tell()  # useless ?
+            cc2 = self.bf.next_byte()
             if cc2 == -1:
-                # There's no byte to peek at
-                # FIXME this is an error situation
-                return -1
+                # There's no byte to read
+                return EToken.EOF
             elif cc2 == ord('>'):
                 # end dictionary
-                self.bf.next_byte()  # read the one I've peeked
                 self.cc = self.bf.next_byte()
                 return Token(EToken.DICT_END)
             else:
@@ -394,31 +408,40 @@ class TokenStream:
             return Token(EToken.NAME, name)
         elif cc == ord('%'):
             # begin comment
-            s = self.bf.peek_byte(7)
+            pos = self.bf.tell()
+
+            # Is it a version marker ?
+            s = self.bf.next_byte(7)
             m = re.match(rb'PDF-(\d).(\d)', s)
             if m:
-                self.bf.next_byte(7)  # move forward over the peeked chars
                 self.cc = self.bf.next_byte()
                 return Token(EToken.VERSION_MARKER,
                              (int(m.group(1)), int(m.group(2))))
-            s = self.bf.peek_byte(4)
+
+            # Is it an EOF marker ?
+            self.bf.seek(pos)
+            s = self.bf.next_byte(4)
             if s == b'%EOF':
-                self.bf.next_byte(4)  # move forward over the peeked chars
                 self.cc = self.bf.next_byte()
                 return Token(EToken.EOF_MARKER)
+
+            # It's a comment, we need to ignore characters up to eol.
+            self.bf.seek(pos)
             while True:
                 # FIXME add a token type COMMENT and keep the value
-                # we need to ignore characters up to eol.
                 cc = self.bf.next_byte()
                 if cc == ord('\r'):
-                    cc2 = self.bf.peek_byte()
+                    # Do we have a \r\n pair ?
+                    pos = self.bf.tell()
+                    cc2 = self.bf.next_byte()
                     if cc2 == ord('\n'):
                         # we've found '\r\n', dos-style eol
-                        self.bf.next_byte()  # move forward over the peeked char
                         self.cc = self.bf.next_byte()
                         return Token(EToken.CRLF)
+
                     # we've found '\r', mac-style eol
-                    self.cc = self.bf.next_byte()
+                    self.bf.seek(pos)
+                    self.cc = self.bf.next_byte()  # could also do cc = cc2
                     return Token(EToken.CR)
                 elif cc == ord('\n'):
                     # we've found '\n', unix-style eol
@@ -431,13 +454,14 @@ class TokenStream:
             self.cc = self.bf.next_byte()
             return Token(EToken.ARRAY_END)
         elif cc == ord('\r'):
-            cc2 = self.bf.peek_byte()
+            pos = self.bf.tell()
+            cc2 = self.bf.next_byte()
             if cc2 == ord('\n'):
                 # we've found '\r\n', dos-style eol
-                self.bf.next_byte()  # move forward over the peeked char
                 self.cc = self.bf.next_byte()
                 return Token(EToken.CRLF)
             # we've found '\r', mac-style eol
+            self.bf.seek(pos)
             self.cc = self.bf.next_byte()
             return Token(EToken.CR)
         elif cc == ord('\n'):
@@ -485,31 +509,67 @@ class TokenStream:
         return tok
       
     #---------------------------------------------------------------------------
+    # get_subsection_entry
+    #---------------------------------------------------------------------------
+ 
+    def get_subsection_entry(self):
+        """Parse a subsection entry at this point in the stream."""
+        # "Each entry shall be exactly 20 bytes long, including the end-of-line
+        # marker."
+        cc = self.cc
+
+        # First byte has been read but nor analyzed, get the other 19
+        s = bytearray()
+        s.insert(0, cc)
+        s += self.bf.next_byte(19)
+        if s == -1:
+            return Token(EToken.EOF)
+        
+        pat = b'(\d{10}) (\d{5}) ([nf])' + bEOLSP + b'$'
+        m = re.match(pat, s)
+        if not m:
+            # I know the entry count, this should never happen
+            cc = self.bf.next_byte()
+            return Token(EToken.ERROR)
+        x = int(m.group(1))  # offset, if in_use, or object number if free
+        gen = int(m.group(2))
+        in_use = m.group(3) == b'n'
+        
+        self.cc = self.bf.next_byte()
+        return Token(EToken.SUBSECTION_ENTRY, (x, gen, in_use))
+      
+    #---------------------------------------------------------------------------
     # get_subsection_header
     #---------------------------------------------------------------------------
  
-    # Pdf spec: "The subsection shall begin with a line containing two numbers
-    # separated by a SPACE (20h), denoting the object number of the first
-    # object in this subsection and the number of entries in the subsection."
+    # "The subsection shall begin with a line containing two numbers separated
+    # by a SPACE (20h), denoting the object number of the first object in this
+    # subsection and the number of entries in the subsection."
+
+    # We don't know the number 
 
     def get_subsection_header(self):
         """Parse a subsection header at this point in the stream."""
-        # Typically the previous token that was read was an EOL marker
-        # I should probably verify the same invariant as next_token(). self.cc
-        # holds the next character following the EOL marker.
+        # Invariant: cc has been read from the stream, but not yet analyzed. It
+        # is stored (persisted in between calls) in self.cc. This means that
+        # every time control leaves this function (through return), it must
+        # read, but not analyze, the next character, and store it in self.cc.
         cc = self.cc
+
+        # Following the 'xref' keyword, en EOL marker token has been read, so
+        # cc is the first character in the header line.
 
         # Save state in case we rollback
         save_cc = self.cc
-        bytes_peeked = 0
+        pos = self.bf.tell()
 
         # Get the first integer (first_objn), cf. get_regular_run())
         s = bytearray()
         while cc not in TokenStream.wspace:  # FIXME this is not robust enough
             s.append(cc)
-            cc = self.bf.peek_byte()
-            bytes_peeked += 1
-            
+            cc = self.bf.next_byte()
+            if cc == -1:
+                return Token(EToken.EOF)
         try:
             first_objn = int(s)
         except ValueError:
@@ -517,21 +577,23 @@ class TokenStream:
             # that we reached the end of the last subsection, and the data
             # we've been reading is actually whatever follows the xref section.
 
-            # Restore state
+            # Restore state, we want the entire line to be re-analyzed
             self.cc = save_cc
-            return Token(EToken.ERROR, f"Couldn't parse integer from '{s}'")
+            self.bf.seek(pos)
+            return Token(EToken.UNEXPECTED)
 
-        # Move over the single space
-        cc = self.bf.peek_byte()
-        bytes_peeked += 1
+        # Move over the single space (FIXME should verify it ?)
+        cc = self.bf.next_byte()
+        if cc == -1:
+            return Token(EToken.EOF)
 
         # Get the second integer (entry_cnt), cf. get_regular_run())
         s = bytearray()
         while cc not in [ord('\r'), ord('\n')]:
             s.append(cc)
-            cc = self.bf.peek_byte()
-            bytes_peeked += 1
-
+            cc = self.bf.next_byte()
+            if cc == -1:
+                return Token(EToken.EOF)
         try:
             entry_cnt = int(s)
         except ValueError:
@@ -539,18 +601,35 @@ class TokenStream:
             # that we reached the end of the last subsection, and the data
             # we've been reading is actually whatever follows the xref section.
 
-            # Restore state
+            # Restore state, we want the entire line to be re-analyzed
             self.cc = save_cc
-            return Token(EToken.ERROR, f"Couldn't parse integer from '{s}'")
+            self.bf.seek(pos)
+            return Token(EToken.UNEXPECTED)
 
-        # At this point, cc is \r or \n, get the EOL marker
+        # At this point, cc should be \r or \n, get the EOL marker
         self.cc = cc
 
-        # This returns CRLF, CR, or LF, if the file is correct, and self.cc
-        # holds the next non-analyzed character.
-        tok = self.next_token()
-        if tok.type == EToken.ERROR or tok.type == EToken.EOF:
-            return tok
+        # This will parse CRLF, CR, or LF, or an error
+        if cc == ord('\r'):
+            pos2 = self.bf.tell()
+            cc2 = self.bf.next_byte()
+            if cc2 == -1:
+                return Token(EToken.EOF)
+            if cc2 != ord('\n'):
+                # we've found '\r', mac-style eol
+                self.bf.seek(pos2)
+            # we've found '\r\n', dos-style eol
+        elif cc != ord('\n'):
+            # There's something else here that was not expected
+            self.cc = save_cc
+            self.bf.seek(pos)
+            return Token(EToken.UNEXPECTED)
+        # we've found '\n', unix-style eol
+
+        # We've successfully parsed the entire line, we got the token, so we
+        # must prepare the byte stream for the next token.
+        
+        self.cc = self.bf.next_byte()  # FIXME test EOF ?
         return Token(EToken.SUBSECTION_HDR, (first_objn, entry_cnt))
 
 #-------------------------------------------------------------------------------

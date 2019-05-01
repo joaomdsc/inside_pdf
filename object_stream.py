@@ -36,6 +36,7 @@ class EObject(Enum):
     ERROR = auto()          # pseudo-object describing a parsing error 
     EOF = auto()            # pseudo-object describing the EOF condition
     VERSION_MARKER = auto() # %PDF-n.m
+    EOF_MARKER = auto()     # %%EOF
     BOOLEAN = auto()
     INTEGER = auto()
     REAL = auto()
@@ -48,6 +49,8 @@ class EObject(Enum):
     IND_OBJ_DEF = auto()    # indirect object definition
     IND_OBJ_REF = auto()    # indirect object reference
     XREF_SECTION = auto()   # cross reference section
+    TRAILER = auto()        # file trailer
+    STARTXREF = auto()      # the 'startxref' keyword
 
     def __str__(self):
         """Print out 'NAME' instead of 'EToken.NAME'."""
@@ -81,7 +84,11 @@ class PdfObject():
         elif self.type == EObject.DICTIONARY:
             s += '{'
             for k, v in self.data.items():
-                s += f'({k}, {v}), '
+                # s += f"({k}, {v.data.decode('unicode_escape')}, "
+                
+                # Dictionary values can be any kind of PdfObject, I need a real
+                # recursive object-printing function.
+                s += f"({k},) "
             s += '}'
         elif self.type == EObject.XREF_SECTION:
             xref_sec = self.data
@@ -158,8 +165,8 @@ class ObjectStream:
 
         # The xref table will be a property of the object stream ?
 
-    def reset(self, offset):
-        self.tk.reset(offset)
+    def seek(self, offset):
+        self.tk.seek(offset)
         # Normal init
         self.tok = self.tk.next_token()
       
@@ -169,19 +176,29 @@ class ObjectStream:
  
     def get_indirect_obj_def(self):
         """Found the opening OBJECT_BEGIN token, now get the entire object."""
+        # self.tok has an EToken.OBJECT_BEGIN, parse the following tokens.
+        # Return is done with the closing token (already analyzed) in self.tok.
+        tok = self.tok
 
-        tok = self.tok
+        # Get the defined (internal) object
+        self.tok = self.tk.next_token()
         obj = self.next_object()
+        if obj.type in [EObject.ERROR, EObject.EOF]:
+            return obj
+        
+        # self.tok holds the next token, read but not yet analyzed
         tok = self.tok
+
+        # Ignore any end-if-line marker
         if tok.type in [EToken.CR, EToken.LF, EToken.CRLF]:
-            # Ignore end-if-line markers
             tok = self.tk.next_token()
+            if tok.type == EToken.EOF:
+                return PdfObject(EObject.EOF)
+            elif tok.type == EToken.ERROR:
+                return PdfObject(EObject.ERROR)
+            
         if tok.type == EToken.OBJECT_END:
             return obj
-        elif tok.type == EToken.EOF:
-            return PdfObject(EObject.EOF)
-        else:
-            return PdfObject(EObject.ERROR)
       
     #---------------------------------------------------------------------------
     # get_array
@@ -189,9 +206,8 @@ class ObjectStream:
  
     def get_array(self):
         """Found the opening ARRAY_BEGIN token, now get the entire array."""
-        # self.tok has a EToken.ARRAY_BEGIN, parse the following tokens.
-        # Arrays can hold any kind of objects, including other arrays and
-        # dictionaries.
+        # self.tok has an EToken.ARRAY_BEGIN, parse the following tokens.
+        # Return is done with the closing token (already analyzed) in self.tok.
 
         # Prepare an array object
         arr = []
@@ -208,10 +224,14 @@ class ObjectStream:
             if tok.type == EToken.EOF:
                 return PdfObject(EObject.EOF)
             self.tok = tok
+            
             obj = self.next_object()
+            if obj.type in [EObject.ERROR, EObject.EOF]:
+                return obj
+            
+            # self.tok holds the next token, read but not yet analyzed
             tok = self.tok
-            # The next token is already stored in self.tok, but it hasn't been
-            # analyzed yet.
+
             arr.append(obj)
       
     #---------------------------------------------------------------------------
@@ -220,9 +240,8 @@ class ObjectStream:
  
     def get_dictionary(self):
         """Found the opening DICT_BEGIN token, now get the entire dictionary."""
-        # self.tok has a EToken.DICT_BEGIN, parse the following tokens.
-        # Dictionaries are sets of (key, value) pairs, where the value can be
-        # any kind of object, including arrays and other dictionaries.
+        # self.tok has an EToken.DICT_BEGIN, parse the following tokens.
+        # Return is done with the closing token (already analyzed) in self.tok.
 
         # Prepare a dictionary object
         d = {}
@@ -254,79 +273,61 @@ class ObjectStream:
                 return PdfObject(EObject.ERROR)
 
     #---------------------------------------------------------------------------
-    # get_xref_section - when we are given its offset in the file
+    # get_xref_section
     #---------------------------------------------------------------------------
+
     # There are two types of xref sections that may be found in a pdf file, and
     # two ways of finding them:
     #
-    #   - read from the end, got to offset, find either the 'xref' keyword, or
+    #   - read from the end, go to offset, find either the 'xref' keyword, or
     #     an object definition (which denotes a xref stream)
     #
     #   - parse the file sequentially, get a 'xref' token or object definition.
-    #     This what is implemented below.
-    #---------------------------------------------------------------------------
+    #     This is what is implemented below.
 
     def get_xref_section(self):
         """Parse a cross reference section into an object"""
         # self.tok has a EToken.XREF_SECTION, parse the following tokens.
-        tok = self.tk.next_token()
 
-        # Ignore end-if-line markers
-        if tok.type in [EToken.CR, EToken.LF, EToken.CRLF]:
-            # Don't do this... next_token() will return an INTEGER because it
-            # lacks the context
-            tok = self.tk.next_token()
-            
+        # "Each cross-reference section shall begin with a line containing the
+        # keyword xref": this implies an end-of-line marker after 'xref'
+        tok = self.tk.next_token()
+        if tok.type not in [EToken.CR, EToken.LF, EToken.CRLF]:
+            self.tok = tok  # FIXME this way, self.tok will be analyzed again
+            return PdfObject(EObject.ERROR)
+
         # Loop over cross-reference subsections
         xref_sec = XrefSection()
         while True:
-            # "The line terminator is always b'\n' for binary files", so says
-            # the Python Std Library doc. So it's not safe to use readline().
-            line = self.f.readline()
-
-            # I have 2 things to fix: need to implement my own tell() (and
-            # rename reset() as seek(), btw); need to read these lines with my
-            # token_/byte_stream stack.
-            if line == b'':
-                return PdfObject(EObject.EOF)
-
-            # Each cross-reference subsection shall contain entries for a
-            # contiguous range of object numbers. The subsection shall begin
-            # with a line containing two numbers separated by a SPACE (20h),
-            # denoting the object number of the first object in this subsection
-            # and the number of entries in the subsection.
-            # Ask the token_stream module for this information
+            # Get a special token representing the sub-section header
             tok = self.tk.get_subsection_header()
-            if tok.type == EToken.ERROR:
-                return PdfObject(EObject.ERROR)
             if tok.type == EToken.EOF:
                 return PdfObject(EObject.EOF)
-            if not m:
-                # We're returning here because we found a line that doesn't
-                # match the beginning of a xref sub-section (this is the
-                # equivalent of finding a _END token). We undo the last
-                # readline so we can resume parsing normally.
+            if tok.type == EToken.ERROR:
+                return PdfObject(EObject.ERROR)
+            if tok.type == EToken.UNEXPECTED:
+                # Couldn't parse the line as a sub-section header, this means
+                # that the sub-section is over.
                 self.xref_sec = xref_sec
-                self.reset(fpos)
-                print(xref_sec)
+                
+                # State has been rolled back, so prepare to continue
+                self.tok = self.tk.next_token()
                 return PdfObject(EObject.XREF_SECTION, xref_sec)
-            first_objn = int(m.group(1))
-            entry_cnt = int(m.group(2))
+
+            # Sub-section header was successfully parsed
+            first_objn, entry_cnt = tok.data
 
             # I'm assuming entry_cnt is not 0.
             subs = XrefSubSection(first_objn, entry_cnt)
             for i in range(entry_cnt):
-                fpos = self.f.tell()
-                line = self.f.readline()
-                pat = b'(\d{10}) (\d{5}) ([nf])' + bEOLSP
-                m = re.match(pat, line)
-                if not m:
-                    # I know the entry count, this should never happen
+                # Get a special token representing a sub-section entry
+                tok = self.tk.get_subsection_entry()
+                if tok.type == EToken.EOF:
+                    return PdfObject(EObject.EOF)
+                if tok.type == EToken.ERROR:
                     return PdfObject(EObject.ERROR)
-                x = int(m.group(1))  # offset, if in_use, or object number if free
-                gen = int(m.group(2))
-                in_use = m.group(3) == b'n'
-                subs.entries.append((x, gen, in_use))
+                subs.entries.append(tok.data)
+
             # Finish off the this sub-section
             xref_sec.sub_sections.append(subs)
       
@@ -383,13 +384,12 @@ class ObjectStream:
                     # tok) and generation number (from tok2)
                     self.tk.next_token()  # peeked tok2
                     self.tk.next_token()  # peeked tok3
-                    self.tok = self.tk.next_token()
-                    # This does not work, I miss the endobj keyword. I do get
-                    # the next object - say, a dictionary - but that can be
-                    # followed by an end of line and the endobj keyword.
+                    # Get the defined (internal) object
+                    self.tok = tok3
                     obj = self.get_indirect_obj_def()
                     if obj.type in [EObject.ERROR, EObject.EOF]:
                         return obj
+                    self.tok = self.tk.next_token()
                     return PdfObject(EObject.IND_OBJ_DEF,
                                      data=dict(obj=obj, objn=tok.data, gen=tok2.data))
                 elif tok3.type == EToken.OBJ_REF:
@@ -437,7 +437,30 @@ class ObjectStream:
             self.tok = self.tk.next_token()
             return obj
 
+        # Is it a trailer ?
+        elif tok.type == EToken.TRAILER:
+            tok = self.tk.next_token()
+            if tok.type != EToken.DICT_BEGIN:
+                # FIXME specify once and for all which token I want to see when
+                # an error has been detected. The question is "how do I recover
+                # from this error ?"
+                self.tok = self.tk.next_token()
+                return PdfObject(EObject.ERROR)
+            obj = self.get_dictionary()
+            self.tok = self.tk.next_token()
+            return PdfObject(EObject.TRAILER, obj)
+
+        elif tok.type == EToken.STARTXREF:
+            self.tok = self.tk.next_token()
+            return PdfObject(EObject.STARTXREF)
+
+        elif tok.type == EToken.EOF_MARKER:
+            self.tok = self.tk.next_token()
+            return PdfObject(EObject.EOF_MARKER)
+
         # Is it a stream ? FIXME
+        elif tok.type == EToken.STREAM_BEGIN:
+            sys.exit()
 
         # Is it null ?
         elif tok.type == EToken.NULL:

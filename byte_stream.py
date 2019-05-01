@@ -31,145 +31,73 @@ class ByteStream:
         self.filepath = filepath
         self.f = f
         self.blk_sz = blk_sz
-        self.bytes_read = 0
-        
-        self.buf = b''  # normal
-        self.i = 0
-        self.peek_ahead = False
-        self.next_buf = b''  # when peek_ahead is True, use this as data source
+        self.buf = b''
+        self.pos = 0
+        self.s_pos = 0  # stream position (a.k.a. file pointer)
 
-    def reset(self, offset):
+    def seek(self, offset):
         self.f.seek(offset)
-        self.bytes_read = offset
-        
-        # Normal init
-        self.buf = b''  # normal
-        self.i = 0
-        self.peek_ahead = False
-        self.next_buf = b''  # when peek_ahead is True, use this as data source
+        self.buf = b''
+        self.pos = 0
+        self.s_pos = offset
+
+    def tell(self):
+        return self.s_pos
         
     def close(self):
         self.f.close()
 
-    def file_pos(self):
-        return self.bytes_read + self.i
-
-    def tell(self):
-        return self.f.tell()
-
-    # FIXME Try this: forget about peeking. Implement proper tell() and seek()
-    # functions in byte_stream, and that's it. Want to back out at some point ?
-    # Assuming you called tell() at the right moment, just seek back to
-    # it. Much simpler.
+    # New functionality and interface: forget about peeking. Implement proper
+    # tell() and seek() functions in next_byte, and that's it. Want to back out
+    # at some point ? Assuming you called tell() at the right moment, just
+    # seek() back to it. Much simpler.
         
     #---------------------------------------------------------------------------
     # next_byte
     #---------------------------------------------------------------------------
     
     def next_byte(self, n=1):
-        """Get the next character from the file, checking next_buf as needed."""
-        s = bytearray(b'')
-        for k in range(n):
-            # Have we reached the end of the current buffer ?
-            if self.i == len(self.buf):
-                self.bytes_read += len(self.buf)
-                # if peek_ahead is True, get next_buf, otherwise read a new one
-                if self.peek_ahead == True:
-                    self.peek_ahead = False
-                    self.buf = self.next_buf
-                    self.next_buf = b''
-                else:
-                    self.buf = self.f.read(self.blk_sz)
-                    if not self.buf:
-                        return -1
-
-                # Reset the index
-                self.i = 0
-            s.append(self.buf[self.i])
-            self.i += 1
-        if n == 1:
-            return s[0]
-        return s
-        
-    #---------------------------------------------------------------------------
-    # peek_byte
-    #---------------------------------------------------------------------------
-    
-    def peek_byte(self, n=1):
-        """Have a peek at the next character(s) from the file. Read a new buffer if needed.
-"""
-        # peek() always starts out from the next() state
-        peek_buf = self.buf
-        j = self.i
-        
-        s = bytearray(b'')
-        for k in range(n):
-            if j == len(peek_buf):
-                # self.buf has been exhausted by peek, need to move to the next
-                # block, do I have it already ?
-                if not self.peek_ahead:
-                    # Read a new block from file
-                    self.peek_ahead = True
-                    self.next_buf = self.f.read(self.blk_sz)
-                    if not self.next_buf:
-                        return -1
-                peek_buf = self.next_buf
-
-                # Reset the index
-                j = 0
-            # I should be getting chars from next_buf now
-            s.append(peek_buf[j])
-            j += 1
-        if n == 1:
-            return s[0]
-        return s
-            
-    #---------------------------------------------------------------------------
-    # next_stream
-    #---------------------------------------------------------------------------
-    
-    def next_stream(self, length):
-        """Get the next stream of 'length' bytes from the file."""
+        """Get the next stream of 'n' bytes from the file."""
 
         # Number of bytes available in the current buffer
-        available = len(self.buf) - self.i
+        available = len(self.buf) - self.pos
 
         # Have we reached the end of the current buffer ?
         if available == 0:
-            # if peek_ahead is True, get next_buf, otherwise read a new one
-            if self.peek_ahead == True:
-                self.peek_ahead = False
-                self.buf = self.next_buf
-                self.next_buf = b''
-            else:
-                self.buf = self.f.read(self.blk_sz)
-                if not self.buf:
-                    return -1
+            # read a new buffer
+            self.buf = self.f.read(self.blk_sz)
+            if not self.buf:
+                return -1
             # Reset the indexes
             available = len(self.buf)
-            self.i = 0
+            self.pos = 0
 
         # Can we serve this request entirely form the current buffer ?
-        if length <= available:
-            s = self.buf[self.i:self.i + length]
-            self.i += length
+        if n <= available:
+            s = self.buf[self.pos:self.pos + n]
+            self.pos += n
+            self.s_pos += n
+            if n == 1:
+                return s[0]
             return s
 
         # We need more then one block 
         s = bytearray(b'')
-        s += self.buf[self.i:]
-        remaining = length - available
+        s += self.buf[self.pos:]
+        remaining = n - available
         while True:
            x = self.f.read(self.blk_sz)
            if not x:
                # We may have read part of the stream, but we don't return that 
+               self.s_pos = -1
                return -1
            # Is this the last block we need to read ? 
            if remaining <= len(x):
                s += x[:remaining]
-               # This self.buf has an unusual length, but it doesn't matter
+               # This self.buf has an unusual n, but it doesn't matter
                self.buf = x[remaining:]
-               self.i = 0
+               self.pos = 0
+               self.s_pos += n
                return s
            s += x
            remaining -= len(x)
