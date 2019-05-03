@@ -139,6 +139,20 @@ class ObjectStreamTest(unittest.TestCase):
             self.assertEqual(EObject.REAL, y.type)
             self.assertEqual(1.0, y.data)
 
+    # def test04(self):
+    #     """Test stream objects."""
+    #     filepath = os.path.join(ObjectStreamTest.path, 'stream.txt')
+    #     with open(filepath, 'rb') as f:
+    #         ob = ObjectStream(filepath, f)
+
+    #         # Retrieve a few tokens
+    #         obj = ob.next_object()
+    #         self.assertEqual(EObject.INTEGER, obj.type)
+    #         self.assertEqual(13, obj.data)
+    #         obj = ob.next_object()
+    #         self.assertEqual(EObject.NAME, obj.type)
+    #         self.assertEqual(b'byebye', obj.data)
+
     # FIXME test arrays with embedded end-of-lines
 
 if __name__ == '__main__':

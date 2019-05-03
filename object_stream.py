@@ -7,9 +7,6 @@ import sys
 from enum import Enum, auto, unique
 from token_stream import EToken, TokenStream
 
-bEOL = b'(\r\n|\r|\n)'
-bEOLSP = b'(\r\n| \r| \n)'
-
 #-------------------------------------------------------------------------------
 # I want stdout to be unbuffered, always
 #-------------------------------------------------------------------------------
@@ -51,6 +48,7 @@ class EObject(Enum):
     XREF_SECTION = auto()   # cross reference section
     TRAILER = auto()        # file trailer
     STARTXREF = auto()      # the 'startxref' keyword
+    STREAM_DATA = auto()    # the bytes between 'stream' and 'endstream'
 
     def __str__(self):
         """Print out 'NAME' instead of 'EToken.NAME'."""
@@ -182,6 +180,11 @@ class ObjectStream:
 
         # Get the defined (internal) object
         self.tok = self.tk.next_token()
+        if tok.type == EToken.EOF:
+            return PdfObject(EObject.EOF)
+        elif tok.type == EToken.ERROR:
+            return PdfObject(EObject.ERROR)
+        
         obj = self.next_object()
         if obj.type in [EObject.ERROR, EObject.EOF]:
             return obj
@@ -271,6 +274,56 @@ class ObjectStream:
                 tok = self.tok
             else:
                 return PdfObject(EObject.ERROR)
+      
+    #---------------------------------------------------------------------------
+    # get_stream
+    #---------------------------------------------------------------------------
+ 
+    def get_stream(self, length):
+        """Found the opening STREAM_BEGIN token, now get the entire dictionary."""
+        # self.tok has an EToken.STREAM_BEGIN, parse the following tokens.
+        # Return is done with the closing token (already analyzed) in self.tok.
+
+        # FIXME better to ask for forgiveness than for permission. I need to
+        # stop testing EOF and ERROR and every single next_XXX() function, use
+        # exceptions instead.
+
+        # Get the token that follows 'stream' (CRLF or LF)
+        tok = self.tk.next_token()
+        if tok.type == EToken.EOF:
+            return PdfObject(EObject.EOF)
+
+        # "The keyword stream that follows the stream dictionary shall be
+        # followed by an end-of-line marker consisting of either a CARRIAGE
+        # RETURN and a LINE FEED or just a LINE FEED, and not by a CARRIAGE
+        # RETURN alone". PDF spec, § 7.3.8.1, page 19
+        if tok not in [EToken.LF, EToken.CRLF]:
+            return PdfObject(EObject.ERROR)
+
+        # Get the token with the stream data
+        tok = self.tk.next_stream(length)
+        if tok.type == EToken.EOF:
+            return PdfObject(EObject.EOF)
+
+        # "There should be an end-of-line marker after the data and before
+        # endstream; this marker shall not be included in the stream length".
+        # PDF spec, § 7.3.8.1, page 19
+        tok = self.tk.next_token()
+        if tok.type == EToken.EOF:
+            return PdfObject(EObject.EOF)
+        if tok.type not in [EToken.CR, EToken.LF, EToken.CRLF]:
+            return PdfObject(EObject.ERROR)
+
+        # Get the closing STREAM_END
+        tok = self.tk.next_token()
+        if tok.type == EToken.EOF:
+            return PdfObject(EObject.EOF)
+        if tok.type != EToken.STREAM_END:
+            return PdfObject(EObject.ERROR)
+
+        # Return the stream data object, with the closing _END token 
+        return PdfObject(EObject.STREAM_DATA, data=tok.data)
+
 
     #---------------------------------------------------------------------------
     # get_xref_section
@@ -421,13 +474,30 @@ class ObjectStream:
         elif tok.type == EToken.ARRAY_BEGIN:
             # self.tok already has the right value, tok was taken from there
             obj = self.get_array()
+            if obj.type in [EObject.ERROR, EObject.EOF]:
+                return obj
             self.tok = self.tk.next_token()
             return obj
 
         # Is it a dictionary ?
         elif tok.type == EToken.DICT_BEGIN:
             # self.tok already has the right value, tok was taken from there
-            obj = self.get_dictionary()
+            obj = self.get_dictionary()  # self.tok == DICT_END
+            if obj.type in [EObject.ERROR, EObject.EOF]:
+                return obj
+            while True:
+                self.tok = self.tk.next_token()
+                if self.tok not in [EToken.CR, EToken.LF, EToken.CRLF]:
+                    break
+            if self.tok.type != EToken.STREAM_BEGIN:
+                return obj  # return the dict
+
+            # We have found a STREAM_BEGIN token, the 'obj' dict has the Length
+            d = obj.data
+            obj = self.get_stream(d['Length'].data)
+            # FIXME ask for forgiveness, not permission 
+            if obj.type in [EObject.ERROR, EObject.EOF]:
+                return obj
             self.tok = self.tk.next_token()
             return obj
 
@@ -440,6 +510,9 @@ class ObjectStream:
         # Is it a trailer ?
         elif tok.type == EToken.TRAILER:
             tok = self.tk.next_token()
+            # Ignore CRLF (why do I parse the tokens then ?)
+            while tok.type in [EToken.CR, EToken.LF, EToken.CRLF]:
+                tok = self.tk.next_token()
             if tok.type != EToken.DICT_BEGIN:
                 # FIXME specify once and for all which token I want to see when
                 # an error has been detected. The question is "how do I recover
@@ -471,6 +544,42 @@ class ObjectStream:
         else:
             self.tok = self.tk.next_token()
             return PdfObject(EObject.ERROR)
+
+    #---------------------------------------------------------------------------
+    # deref_object - read an indirect object from the file
+    #---------------------------------------------------------------------------
+
+    def deref_object(self, o):
+        """Read a dictionary, return it as a python dict with PdfObject values."""
+        if o.type != EObject.IND_OBJ_REF:
+            print(f'Expecting an indirect object reference, got "{o.type}"'
+                  + ' instead')
+            return None
+
+        if not self.xref_sec:
+            return None
+
+        # Now use objn to search the xref table for the file offset where
+        # this catalog dictionary object can be found; seek the file to
+        # that offset, and do another ob.next_object()
+
+        # Catalog dictionary object is found at this offset, go there
+        entry = self.xref_sec.get_object(o.data['objn'], o.data['gen'])
+        if not entry:
+            return None
+        offset, _, _ = entry
+        self.seek(offset)
+
+        # Now read the next char, this will be the beginning of
+        # "6082 0 obj^M<</Metadata 6125 0 R ..." where 6082 is the objn
+        o = self.next_object()
+        if o.type != EObject.IND_OBJ_DEF:
+            print(f'Expecting an indirect object definition, got "{o.type}"'
+                  + ' instead')
+            return None
+
+        # The indirect object definition surrounds the object we want
+        return o.data['obj']
 
 #-------------------------------------------------------------------------------
 # main

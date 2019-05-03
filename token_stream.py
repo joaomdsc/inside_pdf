@@ -64,6 +64,7 @@ class EToken(Enum):
     SUBSECTION_HDR = auto()    # xref sub-section header
     SUBSECTION_ENTRY = auto()  # xref sub-section entry
     UNEXPECTED = auto()        # asked for a header, got something else
+    STREAM_DATA = auto()       # the bytes between 'stream' and 'endstream'
 
     def __str__(self):
         """Print out 'NAME' instead of 'EToken.NAME'."""
@@ -97,12 +98,6 @@ Tokens are separated from each other by whitespace and/or delimiter characters.
             s += self.data
         s += ')'
         return s
-
-    def begin(self):
-        return self.type in [EToken.ARRAY_BEGIN, EToken.DICT_BEGIN, EToken.OBJECT_BEGIN]
-
-    def end(self):
-        return self.type in [EToken.ARRAY_END, EToken.DICT_END, EToken.OBJECT_END]
         
     def print_indented(self, indent):
         print(' '*4*indent + self.__str__())
@@ -556,9 +551,6 @@ class TokenStream:
         # read, but not analyze, the next character, and store it in self.cc.
         cc = self.cc
 
-        # Following the 'xref' keyword, en EOL marker token has been read, so
-        # cc is the first character in the header line.
-
         # Save state in case we rollback
         save_cc = self.cc
         pos = self.bf.tell()
@@ -626,11 +618,31 @@ class TokenStream:
             return Token(EToken.UNEXPECTED)
         # we've found '\n', unix-style eol
 
-        # We've successfully parsed the entire line, we got the token, so we
-        # must prepare the byte stream for the next token.
-        
-        self.cc = self.bf.next_byte()  # FIXME test EOF ?
+        # We've successfully parsed the token, return it
+        self.cc = self.bf.next_byte()
         return Token(EToken.SUBSECTION_HDR, (first_objn, entry_cnt))
+      
+    #---------------------------------------------------------------------------
+    # next_stream
+    #---------------------------------------------------------------------------
+ 
+    def next_stream(self, length):
+        """Parse a set of 'length' stream bytes at this point in the stream."""
+        # Invariant: cc has been read from the stream, but not yet analyzed. It
+        # is stored (persisted in between calls) in self.cc. This means that
+        # every time control leaves this function (through return), it must
+        # read, but not analyze, the next character, and store it in self.cc.
+        cc = self.cc
+
+        # First byte has been read but nor analyzed, get the other 19
+        s = bytearray()
+        s.insert(0, cc)
+        s += self.bf.next_byte(length - 1)
+        if s == -1:
+            return Token(EToken.EOF)
+        
+        self.cc = self.bf.next_byte()
+        return Token(EToken.STREAM_DATA, data=s)
 
 #-------------------------------------------------------------------------------
 # main

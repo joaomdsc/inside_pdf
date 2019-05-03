@@ -9,7 +9,6 @@ from object_stream import EObject, XrefSection, ObjectStream
 
 EOL = '(\r\n|\r|\n)'
 bEOL = b'(\r\n|\r|\n)'
-bEOLSP = b'(\r\n| \r| \n)'
 
 #-------------------------------------------------------------------------------
 # I want stdout to be unbuffered, always
@@ -127,42 +126,6 @@ def get_trailer(filepath):
     return trailer, offset
 
 #-------------------------------------------------------------------------------
-# deref_object - read an indirect object from the file
-#-------------------------------------------------------------------------------
-
-def deref_object(o, ob, xref_sec):
-    # FIXME make this a method of ObjStream, perhaps ? to get the right context ?
-    """Read a dictionary, return it as a python dict with PdfObject values."""
-    if o.type != EObject.IND_OBJ_REF:
-        print(f'Expecting an indirect object reference, got "{o.type}"'
-              + ' instead')
-        return None
-
-    # Now use objn to search the xref table for the file offset where
-    # this catalog dictionary object can be found; seek the file to
-    # that offset, and do another ob.next_object()
-
-    # print(f"Getting object referred to by {o.data['objn']} {o.data['gen']}")
-
-    # Catalog dictionary object is found at this offset, go there
-    entry = xref_sec.get_object(o.data['objn'], o.data['gen'])
-    if not entry:
-        return None
-    offset, _, _ = entry
-    ob.seek(offset)
-
-    # Now read the next char, this will be the beginning of
-    # "6082 0 obj^M<</Metadata 6125 0 R ..." where 6082 is the objn
-    o = ob.next_object()
-    if o.type != EObject.IND_OBJ_DEF:
-        print(f'Expecting an indirect object definition, got "{o.type}"'
-              + ' instead')
-        return None
-
-    # The indirect object definition surrounds the object we want
-    return o.data['obj']
-
-#-------------------------------------------------------------------------------
 # get_xref - read file from the end, extract the xref table
 #-------------------------------------------------------------------------------
 
@@ -201,8 +164,7 @@ def get_xref(filepath):
         xref_sec = o.data
 
         # # Print out the cross reference table
-        # print()
-        # print('xref')
+        print(o)
         # print(xref_sec)
         
         # What comes after the cross reference section ?
@@ -230,22 +192,24 @@ def get_xref(filepath):
             # What we're really interested in, is the catalog dictionary for
             # the PDF document, which is in the Root key
             # print(f'Accessing Root element in "{filepath}"')
-            root = deref_object(o.data['Root'], ob, xref_sec)
+            root = ob.deref_object(o.data['Root'])
 
-            # d is a python dictionary, but the items are PdfObjects
-            d = root.data
-            print(f"Catalog dictionary: {filepath.split(';')[0]}")
-            for k, v in d.items():
-                print(f'    {k}: {v}')
+            if root:
+                # d is a python dictionary, but the items are PdfObjects
+                d = root.data
+                print(f"Catalog dictionary: {filepath.split(';')[0]}")
+                for k, v in d.items():
+                    print(f'    {k}: {v}')
 
             # Next we're interested in the Info dictionary
-            info = deref_object(o.data['Info'], ob, xref_sec)
+            info = ob.deref_object(o.data['Info'])
 
-            # d is a python dictionary, but the items are PdfObjects
-            d = info.data
-            print(f"Information dictionary: {filepath.split(';')[0]}")
-            for k, v in d.items():
-                print(f'    {k}: {v}')
+            if info:
+                # d is a python dictionary, but the items are PdfObjects
+                d = info.data
+                print(f"Information dictionary: {filepath.split(';')[0]}")
+                for k, v in d.items():
+                    print(f'    {k}: {v}')
 
         return len(xref_sec.sub_sections), trailer_follows
         

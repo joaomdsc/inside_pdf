@@ -30,6 +30,9 @@ class TokenStreamTest(unittest.TestCase):
 
     path = r'D:\joao\src\py\pdf\t'
 
+    # FIXME: define a systematic collection of tests on each type of
+    # token. Test with and without whitespace/eol
+
     def test01(self):
         """Test simple next_token() calls."""
         filepath = os.path.join(TokenStreamTest.path, 'token_stream.txt')
