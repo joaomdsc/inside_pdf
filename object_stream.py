@@ -91,6 +91,8 @@ class PdfObject():
         elif self.type == EObject.XREF_SECTION:
             xref_sec = self.data
             s += f'{len(xref_sec.sub_sections)}'
+        elif self.type == EObject.TRAILER:
+            s += f'{self.data}'
         elif self.type == EObject.VERSION_MARKER:
             s += f'{self.data}'
         s += ')'
@@ -297,7 +299,7 @@ class ObjectStream:
         # followed by an end-of-line marker consisting of either a CARRIAGE
         # RETURN and a LINE FEED or just a LINE FEED, and not by a CARRIAGE
         # RETURN alone". PDF spec, § 7.3.8.1, page 19
-        if tok not in [EToken.LF, EToken.CRLF]:
+        if tok.type not in [EToken.LF, EToken.CRLF]:
             return PdfObject(EObject.ERROR)
 
         # Get the token with the stream data
@@ -328,15 +330,6 @@ class ObjectStream:
     #---------------------------------------------------------------------------
     # get_xref_section
     #---------------------------------------------------------------------------
-
-    # There are two types of xref sections that may be found in a pdf file, and
-    # two ways of finding them:
-    #
-    #   - read from the end, go to offset, find either the 'xref' keyword, or
-    #     an object definition (which denotes a xref stream)
-    #
-    #   - parse the file sequentially, get a 'xref' token or object definition.
-    #     This is what is implemented below.
 
     def get_xref_section(self):
         """Parse a cross reference section into an object"""
@@ -479,7 +472,7 @@ class ObjectStream:
             self.tok = self.tk.next_token()
             return obj
 
-        # Is it a dictionary ?
+        # Is it a dictionary ? or a pair dictionary, stream ?
         elif tok.type == EToken.DICT_BEGIN:
             # self.tok already has the right value, tok was taken from there
             obj = self.get_dictionary()  # self.tok == DICT_END
@@ -504,7 +497,7 @@ class ObjectStream:
         # Is it a xref section ?
         elif tok.type == EToken.XREF_SECTION:
             obj = self.get_xref_section()
-            self.tok = self.tk.next_token()
+            # self.tok already holds the next token
             return obj
 
         # Is it a trailer ?

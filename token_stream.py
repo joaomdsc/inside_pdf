@@ -407,11 +407,12 @@ class TokenStream:
 
             # Is it a version marker ?
             s = self.bf.next_byte(7)
-            m = re.match(rb'PDF-(\d).(\d)', s)
-            if m:
-                self.cc = self.bf.next_byte()
-                return Token(EToken.VERSION_MARKER,
-                             (int(m.group(1)), int(m.group(2))))
+            if s != -1:
+                m = re.match(rb'PDF-(\d).(\d)', s)
+                if m:
+                    self.cc = self.bf.next_byte()
+                    return Token(EToken.VERSION_MARKER,
+                                 (int(m.group(1)), int(m.group(2))))
 
             # Is it an EOF marker ?
             self.bf.seek(pos)
