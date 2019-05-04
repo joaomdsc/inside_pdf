@@ -127,6 +127,15 @@ class TokenStream:
         self.cc = self.bf.next_byte()
         self.parens = 0
         self.peeked = []
+
+    def show_peeked(self, msg=None):
+        s = 'peeked = ['
+        for t in self.peeked:
+            s += f'{t.data}, '
+        if len(self.peeked) > 0:
+            s = s[:len(s) -2]
+        s += f']   {msg}'
+        print(s)
         
     #---------------------------------------------------------------------------
     # get_literal_string

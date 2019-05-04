@@ -49,6 +49,7 @@ class EObject(Enum):
     TRAILER = auto()        # file trailer
     STARTXREF = auto()      # the 'startxref' keyword
     STREAM_DATA = auto()    # the bytes between 'stream' and 'endstream'
+    COUPLE = auto()         # a couple of objetcs, such as (dict, stream)
 
     def __str__(self):
         """Print out 'NAME' instead of 'EToken.NAME'."""
@@ -186,7 +187,8 @@ class ObjectStream:
             return PdfObject(EObject.EOF)
         elif tok.type == EToken.ERROR:
             return PdfObject(EObject.ERROR)
-        
+
+        # Get the defined (internal) object
         obj = self.next_object()
         if obj.type in [EObject.ERROR, EObject.EOF]:
             return obj
@@ -472,7 +474,7 @@ class ObjectStream:
             self.tok = self.tk.next_token()
             return obj
 
-        # Is it a dictionary ? or a pair dictionary, stream ?
+        # Is it a dictionary ? or a (dictionary, stream) couple ?
         elif tok.type == EToken.DICT_BEGIN:
             # self.tok already has the right value, tok was taken from there
             obj = self.get_dictionary()  # self.tok == DICT_END
@@ -487,12 +489,12 @@ class ObjectStream:
 
             # We have found a STREAM_BEGIN token, the 'obj' dict has the Length
             d = obj.data
-            obj = self.get_stream(d['Length'].data)
+            obj2 = self.get_stream(d['Length'].data)
             # FIXME ask for forgiveness, not permission 
-            if obj.type in [EObject.ERROR, EObject.EOF]:
-                return obj
+            if obj2.type in [EObject.ERROR, EObject.EOF]:
+                return obj2
             self.tok = self.tk.next_token()
-            return obj
+            return PdfObject(EObject.COUPLE, data=(obj, obj2))
 
         # Is it a xref section ?
         elif tok.type == EToken.XREF_SECTION:

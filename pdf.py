@@ -41,10 +41,10 @@ def parse_tokens(filepath):
             t = tk.next_token()
             if t.type == EToken.EOF:
                 break
-            if t.end():
+            if t.type in [EToken.ARRAY_END, EToken.DICT_END, EToken.OBJECT_END]:
                 indent -= 1
             t.print_indented(indent)
-            if t.begin():
+            if t.type in [EToken.ARRAY_BEGIN, EToken.DICT_BEGIN, EToken.OBJECT_BEGIN]:
                 indent += 1
 
             tokens.append(t)

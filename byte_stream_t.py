@@ -32,7 +32,7 @@ class ByteStreamTest(unittest.TestCase):
 
     def test01(self):
         """Test simple next_byte() calls, up to and across the block boundary."""
-        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.dat')
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
         
@@ -57,7 +57,7 @@ class ByteStreamTest(unittest.TestCase):
 
     def test02(self):
         """Test next_byte(3) calls, up to and across the block boundary."""
-        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.dat')
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
         
@@ -74,7 +74,7 @@ class ByteStreamTest(unittest.TestCase):
 
     def test03(self):
         """Read some characters, seek back, read again.."""
-        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.dat')
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
@@ -88,7 +88,7 @@ class ByteStreamTest(unittest.TestCase):
 
     def test04(self):
         """Read some characters, seek back, read again.."""
-        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.dat')
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
@@ -110,7 +110,7 @@ class ByteStreamTest(unittest.TestCase):
          
     def test05(self):
         """Read some characters, seek back, read again.."""
-        filepath = os.path.join(ByteStreamTest.path, 'sample.txt')
+        filepath = os.path.join(ByteStreamTest.path, 'sample.dat')
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
