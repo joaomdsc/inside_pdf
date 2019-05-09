@@ -31,6 +31,68 @@ class ObjectStreamTest(unittest.TestCase):
     path = r'D:\joao\src\py\pdf\t'
 
     def test01(self):
+        """Test simplest array."""
+        filepath = os.path.join(ObjectStreamTest.path, 'obj_stream00.dat')
+        with open(filepath, 'rb') as f:
+            ob = ObjectStream(filepath, f)
+
+            # Retrieve a few tokens
+            obj = ob.next_object()
+            self.assertEqual(EObject.ARRAY, obj.type)
+            arr = obj.data
+            self.assertEqual(2, len(arr))
+            o = arr[0]
+            self.assertEqual(EObject.INTEGER, o.type)
+            self.assertEqual(17, o.data)
+            o = arr[1]
+            self.assertEqual(EObject.ARRAY, o.type)
+            a2 = o.data
+            self.assertEqual(1, len(a2))
+            o = a2[0]
+            self.assertEqual(EObject.INTEGER, o.type)
+            self.assertEqual(1, o.data)
+
+    def test02(self):
+        """Test simplest array."""
+        filepath = os.path.join(ObjectStreamTest.path, 'obj_stream0.dat')
+        with open(filepath, 'rb') as f:
+            ob = ObjectStream(filepath, f)
+
+            # Retrieve a few tokens
+            obj = ob.next_object()
+            self.assertEqual(EObject.ARRAY, obj.type)
+            arr = obj.data
+            self.assertEqual(3, len(arr))
+            o = arr[0]
+            self.assertEqual(EObject.INTEGER, o.type)
+            self.assertEqual(17, o.data)
+            o = arr[1]
+            self.assertEqual(EObject.STRING, o.type)
+            self.assertEqual(b'a', o.data)
+            o = arr[2]
+            self.assertEqual(EObject.REAL, o.type)
+            self.assertEqual(841.89, o.data)
+
+            # Retrieve a few tokens
+            obj = ob.next_object()
+            self.assertEqual(EObject.ARRAY, obj.type)
+            arr = obj.data
+            self.assertEqual(3, len(arr))
+            o = arr[0]
+            self.assertEqual(EObject.INTEGER, o.type)
+            self.assertEqual(3, o.data)
+            o = arr[1]
+            self.assertEqual(EObject.INTEGER, o.type)
+            self.assertEqual(25, o.data)
+            o = arr[2]
+            self.assertEqual(EObject.ARRAY, o.type)
+            a2 = o.data
+            self.assertEqual(1, len(a2))
+            o = a2[0]
+            self.assertEqual(EObject.INTEGER, o.type)
+            self.assertEqual(1, o.data)
+
+    def test03(self):
         """Test simple next_object() calls."""
         filepath = os.path.join(ObjectStreamTest.path, 'obj_stream1.dat')
         with open(filepath, 'rb') as f:
@@ -52,7 +114,7 @@ class ObjectStreamTest(unittest.TestCase):
             self.assertEqual(EObject.STRING, obj.type)
             self.assertEqual(b'Hello', obj.data)
 
-    def test02(self):
+    def test04(self):
         """Test nested arrays."""
         filepath = os.path.join(ObjectStreamTest.path, 'obj_stream1.dat')
         with open(filepath, 'rb') as f:
@@ -92,7 +154,7 @@ class ObjectStreamTest(unittest.TestCase):
             self.assertEqual(EObject.STRING, obj.type)
             self.assertEqual(b'Hello', obj.data)
 
-    def test03(self):
+    def test05(self):
         """Test nested dictionaries."""
         filepath = os.path.join(ObjectStreamTest.path, 'obj_stream2.dat')
         with open(filepath, 'rb') as f:
@@ -139,7 +201,7 @@ class ObjectStreamTest(unittest.TestCase):
             self.assertEqual(EObject.REAL, y.type)
             self.assertEqual(1.0, y.data)
 
-    def test04(self):
+    def test06(self):
         """Test indirect object references."""
         filepath = os.path.join(ObjectStreamTest.path, 'obj_stream3.dat')
         with open(filepath, 'rb') as f:
@@ -171,7 +233,7 @@ class ObjectStreamTest(unittest.TestCase):
             self.assertEqual(42, o.data['objn'])
             self.assertEqual(0, o.data['gen'])
 
-    def test05(self):
+    def test07(self):
         """Test dictionary objects in dict1.dat."""
         filepath = os.path.join(ObjectStreamTest.path, 'dict1.dat')
         with open(filepath, 'rb') as f:
@@ -252,7 +314,7 @@ class ObjectStreamTest(unittest.TestCase):
             self.assertEqual(EObject.NAME, x3.type)
             self.assertEqual(b'z', x3.data)
 
-    def test06(self):
+    def test08(self):
         """Test dictionary objects in dict2.dat"""
         filepath = os.path.join(ObjectStreamTest.path, 'dict2.dat')
         with open(filepath, 'rb') as f:

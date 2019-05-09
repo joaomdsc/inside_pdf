@@ -60,12 +60,15 @@ def parse_objects(filepath):
     # Parse a character stream into a object stream
     with open(filepath, 'rb') as f:
         ob = ObjectStream(filepath, f)
-        indent = 0
+        print('====================')
         while True:
             o = ob.next_object()
             if o.type == EObject.EOF:
                 break
             print(o)
+            print('--------------------')
+            print(o.show())
+            print('====================')
             objects.append(o)
 
 #-------------------------------------------------------------------------------
@@ -78,6 +81,12 @@ if __name__ == '__main__':
         print(f'usage: {sys.argv[0]} <filepath>')
         exit(-1)
     filepath = sys.argv[1]
+
+    # WARNING: you cannot read a pdf file by looping over the objects from the
+    # beginning. Example: in CNIL-PIA-3-BonnesPratiques.pdf, there is a stream
+    # object with number 6086, where the Length value is given as an indirect
+    # object reference 6099 0 R, and the definition for that object comes later
+    # in the file.
     
     # parse_tokens(filepath)
     parse_objects(filepath)

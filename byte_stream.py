@@ -31,17 +31,26 @@ class ByteStream:
         self.filepath = filepath
         self.f = f
         self.blk_sz = blk_sz
+        # Normal init
         self.buf = b''
         self.pos = 0
         self.s_pos = 0  # stream position (a.k.a. file pointer)
 
+    # self.pos holds the (zero-based) index of the *next* character to be read.
+    
+    # self.s_pos (and the offset parameter to seek()) works like pos, it is
+    # zero-based, and it points to the *next* byte that will be read.
+
     def seek(self, offset):
         self.f.seek(offset)
+        # Normal init
         self.buf = b''
         self.pos = 0
         self.s_pos = offset
 
     def tell(self):
+        # Why not self.f.tell() ? Because the file is read in blocks (usually
+        # 8kb), the file level does not know what particular byte we're reading.
         return self.s_pos
         
     def close(self):

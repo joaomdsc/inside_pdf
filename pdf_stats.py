@@ -126,17 +126,17 @@ def get_trailer(filepath):
     return trailer, offset
 
 #-------------------------------------------------------------------------------
-# get_xref - read file from the end, extract the xref table
+# get_file_data - read file from the end, extract xref table, trailer
 #-------------------------------------------------------------------------------
 
-def get_xref(filepath):
+def get_file_data(filepath):
     """Extract the xref table that is found from the file trailer."""
     # This code does not support any context. It opens its own files, and
     # doesn't need to worry about returning a proper state.
     offset = -1
     trailer = False
 
-    print(f'get_xref: filepath={filepath}')
+    print(f'get_file_data: filepath={filepath}')
 
     # "The line terminator is always b'\n' for binary files", so says the
     # Python Std Library doc. It's really not a good idea to use readline()
@@ -164,7 +164,7 @@ def get_xref(filepath):
         xref_sec = o.data
 
         # # Print out the cross reference table
-        print(o)
+        o.show()
         # print(xref_sec)
         
         # What comes after the cross reference section ?
@@ -230,7 +230,7 @@ def stats_file_to_csv(filepath):
     major, minor = get_version(filepath)
     trailer, offset = get_trailer(filepath)
     # eofs = count_updates(filepath)
-    nsubs, tfollows = get_xref(filepath)
+    nsubs, tfollows = get_file_data(filepath)
 
     # # Print out one .csv line
     # s = (f'{filename};{major}.{minor};{eol:4}'

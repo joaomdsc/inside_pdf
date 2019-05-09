@@ -117,6 +117,7 @@ class TokenStream:
     def __init__(self, filepath, f):
         self.bf = ByteStream(filepath, f)
         self.f = f
+        # Normal init
         self.cc = self.bf.next_byte()
         self.parens = 0
         self.peeked = []
@@ -127,6 +128,9 @@ class TokenStream:
         self.cc = self.bf.next_byte()
         self.parens = 0
         self.peeked = []
+
+    def tell(self):
+        return self.bf.tell() - 1
 
     def show_peeked(self, msg=None):
         s = 'peeked = ['

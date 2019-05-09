@@ -34,7 +34,7 @@ class TokenStreamTest(unittest.TestCase):
     # token. Test with and without whitespace/eol
 
     def test01(self):
-        """Test simple next_token() calls."""
+        """Test simple next_token() and peek_token() calls."""
         filepath = os.path.join(TokenStreamTest.path, 'token_stream.dat')
         with open(filepath, 'rb') as f:
             tk = TokenStream(filepath, f)
@@ -186,8 +186,113 @@ class TokenStreamTest(unittest.TestCase):
             tok = tk.next_token()
             self.assertEqual(EToken.DICT_END, tok.type)
 
-    def test03(self):
-        """Test token peeking."""
+    # def test03(self):
+    #     """Test token peeking."""
+    #     filepath = os.path.join(TokenStreamTest.path, 'obj_stream3.dat')
+    #     with open(filepath, 'rb') as f:
+    #         tk = TokenStream(filepath, f)
+
+    #         tok = tk.next_token()
+    #         self.assertEqual(EToken.INTEGER, tok.type)
+    #         self.assertEqual(98, tok.data)
+    #         tk.show_peeked()
+
+    #         # Peek once
+    #         tok = tk.peek_token()
+    #         self.assertEqual(EToken.INTEGER, tok.type)
+    #         self.assertEqual(73, tok.data)
+    #         tk.show_peeked()
+
+    #         tok = tk.next_token()
+    #         self.assertEqual(EToken.INTEGER, tok.type)
+    #         self.assertEqual(73, tok.data)
+    #         tk.show_peeked()
+
+    #         tok = tk.next_token()
+    #         self.assertEqual(EToken.INTEGER, tok.type)
+    #         self.assertEqual(5, tok.data)
+    #         tk.show_peeked()
+ 
+    #         # Peek twice
+    #         tok = tk.peek_token()
+    #         self.assertEqual(EToken.INTEGER, tok.type)
+    #         self.assertEqual(19, tok.data)
+    #         tk.show_peeked()
+
+            # tok = tk.peek_token()
+            # self.assertEqual(EToken.INTEGER, tok.type)
+            # self.assertEqual(18, tok.data)
+            # tk.show_peeked()
+
+            # tok = tk.next_token()
+            # self.assertEqual(EToken.INTEGER, tok.type)
+            # self.assertEqual(19, tok.data)
+            # tk.show_peeked()
+
+            # tok = tk.next_token()
+            # self.assertEqual(EToken.INTEGER, tok.type)
+            # self.assertEqual(18, tok.data)
+            # tk.show_peeked()
+ 
+            # # Peek twice
+            # tok = tk.peek_token()
+            # self.assertEqual(EToken.INTEGER, tok.type)
+            # self.assertEqual(33, tok.data)
+            # tk.show_peeked()
+
+            # tok = tk.peek_token()
+            # self.assertEqual(EToken.INTEGER, tok.type)
+            # self.assertEqual(45, tok.data)
+            # tk.show_peeked()
+
+            # tok = tk.next_token()
+            # self.assertEqual(EToken.INTEGER, tok.type)
+            # self.assertEqual(33, tok.data)
+            # tk.show_peeked()
+ 
+            # # Peek thrice
+            # tok = tk.peek_token()
+            # self.assertEqual(EToken.INTEGER, tok.type)
+            # self.assertEqual(66, tok.data)
+            # tk.show_peeked()
+
+            # tok = tk.peek_token()
+            # self.assertEqual(EToken.INTEGER, tok.type)
+            # self.assertEqual(13, tok.data)
+            # tk.show_peeked()
+
+            # tok = tk.peek_token()
+            # self.assertEqual(EToken.INTEGER, tok.type)
+            # self.assertEqual(2, tok.data)
+            # tk.show_peeked()
+
+            # tok = tk.next_token()
+            # self.assertEqual(EToken.INTEGER, tok.type)
+            # self.assertEqual(45, tok.data)
+            # tk.show_peeked('after reading 45')
+
+            # tok = tk.next_token()
+            # self.assertEqual(EToken.INTEGER, tok.type)
+            # self.assertEqual(66, tok.data)
+            # tk.show_peeked('after reading 66')
+
+            # # 
+            # tok = tk.next_token()
+            # self.assertEqual(EToken.INTEGER, tok.type)
+            # self.assertEqual(13, tok.data)
+            # tk.show_peeked('after reading 13')
+
+            # tok = tk.peek_token()
+            # self.assertEqual(EToken.OBJ_REF, tok.type)
+            # # self.assertEqual(2, tok.data)
+            # tk.show_peeked('after peeking')
+
+            # tok = tk.peek_token()
+            # # self.assertEqual(EToken.OBJ_REF, tok.type)
+            # tk.show_peeked()
+
+    def test04(self):
+        """Test token seek and tell."""
         filepath = os.path.join(TokenStreamTest.path, 'obj_stream3.dat')
         with open(filepath, 'rb') as f:
             tk = TokenStream(filepath, f)
@@ -195,101 +300,106 @@ class TokenStreamTest(unittest.TestCase):
             tok = tk.next_token()
             self.assertEqual(EToken.INTEGER, tok.type)
             self.assertEqual(98, tok.data)
-            tk.show_peeked()
 
-            # Peek once
-            tok = tk.peek_token()
-            self.assertEqual(EToken.INTEGER, tok.type)
-            self.assertEqual(77, tok.data)
-            tk.show_peeked()
+            # Memorize position after doing a first next_token(), this works
+            xpos = tk.tell()
+            print()
+            print(f'test04: tell: xpos={xpos}, cc="{chr(tk.cc)}", bf.s_pos={tk.bf.s_pos}')
 
             tok = tk.next_token()
             self.assertEqual(EToken.INTEGER, tok.type)
-            self.assertEqual(77, tok.data)
-            tk.show_peeked()
+            self.assertEqual(73, tok.data)
 
             tok = tk.next_token()
             self.assertEqual(EToken.INTEGER, tok.type)
             self.assertEqual(5, tok.data)
-            tk.show_peeked()
- 
-            # Peek twice
-            tok = tk.peek_token()
-            self.assertEqual(EToken.INTEGER, tok.type)
-            self.assertEqual(19, tok.data)
-            tk.show_peeked()
+            
+            tk.seek(xpos)
+            print(f'test04: seek: xpos={xpos}, cc="{chr(tk.cc)}", bf.s_pos={tk.bf.s_pos}')
+            print(f'test04: seek: moved to xpos, then read cc="{chr(tk.cc)}", so s_pos is 1 byte ahead of cc\'s index')
 
-            tok = tk.peek_token()
+            tok = tk.next_token()
             self.assertEqual(EToken.INTEGER, tok.type)
-            self.assertEqual(18, tok.data)
-            tk.show_peeked()
+            self.assertEqual(73, tok.data)
+
+    def test05(self):
+        """Test token seek and tell."""
+        filepath = os.path.join(TokenStreamTest.path, 'obj_stream3.dat')
+        with open(filepath, 'rb') as f:
+            tk = TokenStream(filepath, f)
+
+            # Memorize position at the beginning, this bugs
+            xpos = tk.tell()
+            print()
+            print(f'test05: tell: xpos={xpos}, cc="{chr(tk.cc)}", bf.s_pos={tk.bf.s_pos}')
+
+            # tk.seek(0)
+            # print(f'test05: seek(0): cc="{chr(tk.cc)}", bf.s_pos={tk.bf.s_pos}')
+
+            # tk.seek(1)
+            # print(f'test05: seek(1), cc="{chr(tk.cc)}", bf.s_pos={tk.bf.s_pos}')
+
+            tok = tk.next_token()
+            self.assertEqual(EToken.INTEGER, tok.type)
+            self.assertEqual(98, tok.data)
+
+            tok = tk.next_token()
+            self.assertEqual(EToken.INTEGER, tok.type)
+            self.assertEqual(73, tok.data)
+
+            tok = tk.next_token()
+            self.assertEqual(EToken.INTEGER, tok.type)
+            self.assertEqual(5, tok.data)
 
             tok = tk.next_token()
             self.assertEqual(EToken.INTEGER, tok.type)
             self.assertEqual(19, tok.data)
-            tk.show_peeked()
+
+            pos2 = tk.tell()
+            print(f'test05: tell: pos2={pos2}')
+
+            # Go back
+            tk.seek(xpos)
+            print(f'test05: seek(xpos), cc="{chr(tk.cc)}", bf.s_pos={tk.bf.s_pos}')
+
+            tok = tk.next_token()
+            self.assertEqual(EToken.INTEGER, tok.type)
+            self.assertEqual(98, tok.data)
+
+            tok = tk.next_token()
+            self.assertEqual(EToken.INTEGER, tok.type)
+            self.assertEqual(73, tok.data)
+
+            # Move forward
+            tk.seek(pos2)
 
             tok = tk.next_token()
             self.assertEqual(EToken.INTEGER, tok.type)
             self.assertEqual(18, tok.data)
-            tk.show_peeked()
- 
-            # Peek twice
-            tok = tk.peek_token()
+
+            tok = tk.next_token()
             self.assertEqual(EToken.INTEGER, tok.type)
             self.assertEqual(33, tok.data)
-            tk.show_peeked()
 
-            tok = tk.peek_token()
+            tok = tk.next_token()
             self.assertEqual(EToken.INTEGER, tok.type)
             self.assertEqual(45, tok.data)
-            tk.show_peeked()
 
             tok = tk.next_token()
             self.assertEqual(EToken.INTEGER, tok.type)
-            self.assertEqual(33, tok.data)
-            tk.show_peeked()
- 
-            # Peek thrice
-            tok = tk.peek_token()
-            self.assertEqual(EToken.INTEGER, tok.type)
             self.assertEqual(66, tok.data)
-            tk.show_peeked()
 
-            tok = tk.peek_token()
+            tok = tk.next_token()
             self.assertEqual(EToken.INTEGER, tok.type)
             self.assertEqual(13, tok.data)
-            tk.show_peeked()
 
-            tok = tk.peek_token()
+            tok = tk.next_token()
             self.assertEqual(EToken.INTEGER, tok.type)
             self.assertEqual(2, tok.data)
-            tk.show_peeked()
 
             tok = tk.next_token()
-            self.assertEqual(EToken.INTEGER, tok.type)
-            self.assertEqual(45, tok.data)
-            tk.show_peeked('after reading 45')
-
-            tok = tk.next_token()
-            self.assertEqual(EToken.INTEGER, tok.type)
-            self.assertEqual(66, tok.data)
-            tk.show_peeked('after reading 66')
-
-            # 
-            tok = tk.next_token()
-            self.assertEqual(EToken.INTEGER, tok.type)
-            self.assertEqual(13, tok.data)
-            tk.show_peeked('after reading 13')
-
-            tok = tk.peek_token()
             self.assertEqual(EToken.OBJ_REF, tok.type)
-            # self.assertEqual(2, tok.data)
-            tk.show_peeked('after peeking')
-
-            tok = tk.peek_token()
-            # self.assertEqual(EToken.OBJ_REF, tok.type)
-            tk.show_peeked()
+            
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

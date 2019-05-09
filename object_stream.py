@@ -41,14 +41,13 @@ class EObject(Enum):
     NAME = auto()
     ARRAY = auto()
     DICTIONARY = auto()
-    STREAM = auto()
+    STREAM = auto()         # the bytes between 'stream' and 'endstream'
     NULL = auto()
     IND_OBJ_DEF = auto()    # indirect object definition
     IND_OBJ_REF = auto()    # indirect object reference
     XREF_SECTION = auto()   # cross reference section
     TRAILER = auto()        # file trailer
     STARTXREF = auto()      # the 'startxref' keyword
-    STREAM_DATA = auto()    # the bytes between 'stream' and 'endstream'
     COUPLE = auto()         # a couple of objetcs, such as (dict, stream)
 
     def __str__(self):
@@ -96,6 +95,50 @@ class PdfObject():
             s += f'{self.data}'
         elif self.type == EObject.VERSION_MARKER:
             s += f'{self.data}'
+        s += ')'
+        return s
+
+    def show(self):
+        if self.type in [EObject.BOOLEAN, EObject.INTEGER, EObject.REAL]:
+            return f'{self.data}'
+        if self.type == EObject.STRING:
+            return f'"{self.data[:len(self.data)].decode("unicode_escape")}"'
+        if self.type == EObject.NAME:
+            return f'/{self.data[:len(self.data)].decode("unicode_escape")}'
+        if self.type == EObject.IND_OBJ_REF:
+            return f"{self.data['objn']} {self.data['gen']} R"
+        
+        s = f'{self.type}('
+        if self.type == EObject.VERSION_MARKER:
+            s += f'{self.data}'
+        elif self.type == EObject.ARRAY:
+            s += '['
+            s += ', '.join([x.show() for x in self.data])
+            s += ']'
+        elif self.type == EObject.DICTIONARY:
+            s += '{'
+            # Dictionary key has been decoded for insertion
+            s += ', '.join([f"({k}, {v.show()})"
+                            for k, v in self.data.items()])
+            s += '}'
+        elif self.type == EObject.STREAM:
+            s += self.data[:10].decode('unicode_escape') + '...'
+        elif self.type == EObject.IND_OBJ_DEF:
+            o = self.data['obj']  # PdfObject
+            s += f"{self.data['objn']} {self.data['gen']} "
+            s += o.show()
+        elif self.type == EObject.XREF_SECTION:
+            xref_sec = self.data
+            s += f'{len(xref_sec.sub_sections)}'
+        elif self.type == EObject.TRAILER:
+            o = self.data
+            if o.type != EObject.DICTIONARY:
+                print('trailer data != dict')
+            s += o.show()
+        elif self.type == EObject.COUPLE:
+            s += '('
+            s += ', '.join([x.show() for x in self.data])
+            s += ')'
         s += ')'
         return s
 
@@ -230,9 +273,14 @@ class ObjectStream:
                 return PdfObject(EObject.ERROR)
             if tok.type == EToken.EOF:
                 return PdfObject(EObject.EOF)
+            # Ignore end-if-line markers
+            if tok.type in [EToken.CR, EToken.LF, EToken.CRLF]:
+                tok = self.tk.next_token()
+                continue
             self.tok = tok
             
             obj = self.next_object()
+            # self.tok holds the next token, read but not yet analyzed
             if obj.type in [EObject.ERROR, EObject.EOF]:
                 return obj
             
@@ -284,13 +332,12 @@ class ObjectStream:
     #---------------------------------------------------------------------------
  
     def get_stream(self, length):
-        """Found the opening STREAM_BEGIN token, now get the entire dictionary."""
+        """Found the opening STREAM_BEGIN token, now get all the data."""
         # self.tok has an EToken.STREAM_BEGIN, parse the following tokens.
         # Return is done with the closing token (already analyzed) in self.tok.
 
-        # FIXME better to ask for forgiveness than for permission. I need to
-        # stop testing EOF and ERROR and every single next_XXX() function, use
-        # exceptions instead.
+        # FIXME I need to stop testing EOF and ERROR after every single
+        # next_XXX() function call, use exceptions instead.
 
         # Get the token that follows 'stream' (CRLF or LF)
         tok = self.tk.next_token()
@@ -326,7 +373,7 @@ class ObjectStream:
             return PdfObject(EObject.ERROR)
 
         # Return the stream data object, with the closing _END token 
-        return PdfObject(EObject.STREAM_DATA, data=tok.data)
+        return PdfObject(EObject.STREAM, data=tok.data)
 
 
     #---------------------------------------------------------------------------
@@ -345,7 +392,7 @@ class ObjectStream:
             return PdfObject(EObject.ERROR)
 
         # Loop over cross-reference subsections
-        xref_sec = XrefSection()
+        self.xref_sec = XrefSection()
         while True:
             # Get a special token representing the sub-section header
             tok = self.tk.get_subsection_header()
@@ -355,12 +402,12 @@ class ObjectStream:
                 return PdfObject(EObject.ERROR)
             if tok.type == EToken.UNEXPECTED:
                 # Couldn't parse the line as a sub-section header, this means
-                # that the sub-section is over.
-                self.xref_sec = xref_sec
+                # that the sub-section is over.  The xref is stored as a
+                # property of this ObjectSTream, and it is also returned.
                 
                 # State has been rolled back, so prepare to continue
                 self.tok = self.tk.next_token()
-                return PdfObject(EObject.XREF_SECTION, xref_sec)
+                return PdfObject(EObject.XREF_SECTION, self.xref_sec)
 
             # Sub-section header was successfully parsed
             first_objn, entry_cnt = tok.data
@@ -377,7 +424,7 @@ class ObjectStream:
                 subs.entries.append(tok.data)
 
             # Finish off the this sub-section
-            xref_sec.sub_sections.append(subs)
+            self.xref_sec.sub_sections.append(subs)
       
     #---------------------------------------------------------------------------
     # next_object
@@ -423,15 +470,16 @@ class ObjectStream:
             # If we find an OBJECT_BEGIN, then we have an indirect object
             # definition.
             # If we find an OBJ_REF, then we have an indirect reference.
-            tok2 = self.tk.peek_token()
+            pos = self.tk.tell()
+            tok2 = self.tk.next_token()
             if tok2.type == EToken.INTEGER:
                 # Keep looking
-                tok3 = self.tk.peek_token()
+                tok3 = self.tk.next_token()
                 if tok3.type == EToken.OBJECT_BEGIN:
                     # Start creating the object with the object number (from
                     # tok) and generation number (from tok2)
-                    self.tk.next_token()  # peeked tok2
-                    self.tk.next_token()  # peeked tok3
+                    # self.tk.next_token()  # peeked tok2
+                    # self.tk.next_token()  # peeked tok3
                     # Get the defined (internal) object
                     self.tok = tok3
                     obj = self.get_indirect_obj_def()
@@ -441,14 +489,16 @@ class ObjectStream:
                     return PdfObject(EObject.IND_OBJ_DEF,
                                      data=dict(obj=obj, objn=tok.data, gen=tok2.data))
                 elif tok3.type == EToken.OBJ_REF:
-                    self.tk.next_token()  # peeked tok2
-                    self.tk.next_token()  # peeked tok3
+                    # self.tk.next_token()  # peeked tok2
+                    # self.tk.next_token()  # peeked tok3
                     self.tok = self.tk.next_token()
                     return PdfObject(EObject.IND_OBJ_REF,
                                      data=dict(objn=tok.data, gen=tok2.data))
             # Ignore tok2, we re-read it anyway
+            self.tk.seek(pos)
+            x = tok.data
             self.tok = self.tk.next_token()
-            return PdfObject(EObject.INTEGER, tok.data)
+            return PdfObject(EObject.INTEGER, x)
 
         # Is it a real number ?
         elif tok.type == EToken.REAL:
@@ -469,6 +519,7 @@ class ObjectStream:
         elif tok.type == EToken.ARRAY_BEGIN:
             # self.tok already has the right value, tok was taken from there
             obj = self.get_array()
+            # self.tok == ARRAY_END
             if obj.type in [EObject.ERROR, EObject.EOF]:
                 return obj
             self.tok = self.tk.next_token()
@@ -477,7 +528,8 @@ class ObjectStream:
         # Is it a dictionary ? or a (dictionary, stream) couple ?
         elif tok.type == EToken.DICT_BEGIN:
             # self.tok already has the right value, tok was taken from there
-            obj = self.get_dictionary()  # self.tok == DICT_END
+            obj = self.get_dictionary()
+            # self.tok == DICT_END
             if obj.type in [EObject.ERROR, EObject.EOF]:
                 return obj
             while True:
@@ -488,9 +540,17 @@ class ObjectStream:
                 return obj  # return the dict
 
             # We have found a STREAM_BEGIN token, the 'obj' dict has the Length
-            d = obj.data
-            obj2 = self.get_stream(d['Length'].data)
-            # FIXME ask for forgiveness, not permission 
+            o = obj.data['Length']
+            # FIXME this is not right, CNIL-PIA-3-BonnesPratiques.pdf does not
+            # parse correctly. Length is given as an indirect object ref.
+            if o.type == EObject.INTEGER:
+                ln = o.data
+            elif o.type == EObject.IND_OBJ_REF:
+                ln = self.deref_object(o)
+            else:
+                return PdfObject(EObject.ERROR)
+            obj2 = self.get_stream(ln)
+            # FIXME use exceptions instead
             if obj2.type in [EObject.ERROR, EObject.EOF]:
                 return obj2
             self.tok = self.tk.next_token()
@@ -526,9 +586,9 @@ class ObjectStream:
             self.tok = self.tk.next_token()
             return PdfObject(EObject.EOF_MARKER)
 
-        # Is it a stream ? FIXME
+        # Is it a stream ? Wrong. Streams are preceded by a dictionary.
         elif tok.type == EToken.STREAM_BEGIN:
-            sys.exit()
+            return PdfObject(EObject.ERROR)
 
         # Is it null ?
         elif tok.type == EToken.NULL:
@@ -545,7 +605,7 @@ class ObjectStream:
     #---------------------------------------------------------------------------
 
     def deref_object(self, o):
-        """Read a dictionary, return it as a python dict with PdfObject values."""
+        """Find an object's definition from a reference."""
         if o.type != EObject.IND_OBJ_REF:
             print(f'Expecting an indirect object reference, got "{o.type}"'
                   + ' instead')
