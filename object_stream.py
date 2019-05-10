@@ -116,11 +116,9 @@ class PdfObject():
             s += ', '.join([x.show() for x in self.data])
             s += ']'
         elif self.type == EObject.DICTIONARY:
-            s += '{'
             # Dictionary key has been decoded for insertion
-            s += ', '.join([f"({k}, {v.show()})"
+            s += ', '.join([f"(/{k}, {v.show()})"
                             for k, v in self.data.items()])
-            s += '}'
         elif self.type == EObject.STREAM:
             s += self.data[:10].decode('unicode_escape') + '...'
         elif self.type == EObject.IND_OBJ_DEF:
@@ -355,6 +353,7 @@ class ObjectStream:
         tok = self.tk.next_stream(length)
         if tok.type == EToken.EOF:
             return PdfObject(EObject.EOF)
+        s = tok.data
 
         # "There should be an end-of-line marker after the data and before
         # endstream; this marker shall not be included in the stream length".
@@ -373,8 +372,7 @@ class ObjectStream:
             return PdfObject(EObject.ERROR)
 
         # Return the stream data object, with the closing _END token 
-        return PdfObject(EObject.STREAM, data=tok.data)
-
+        return PdfObject(EObject.STREAM, data=s)
 
     #---------------------------------------------------------------------------
     # get_xref_section
@@ -427,6 +425,34 @@ class ObjectStream:
             self.xref_sec.sub_sections.append(subs)
       
     #---------------------------------------------------------------------------
+    # get_cross_reference
+    #---------------------------------------------------------------------------
+
+    def get_cross_reference(self):
+        """Parse a cross reference section into an object"""
+        # The current token from the stream should be either a XREF_SECTION
+        # (for a traditional cross_reference table) or an INTEGER, introducing
+        # an indirect object definition, for a cross-reference stream
+        # (available in PDF 1.5 and later)
+
+        if self.tok.type == EToken.EOF:
+            return PdfObject(EObject.EOF)
+
+        # Traditional
+        if tok.type == EToken.XREF_SECTION:
+            return self.get_xref_section()
+
+        # Available in PDF 1.5 and later
+        if tok.type == EToken.INTEGER:
+            obj = self.next_object()
+            if obj.type == EObject.IND_OBJ_DEF:
+                return obj
+
+        # Any other case is an error, because we were expecting to find a
+        # cross-reference table, modern or traditional.
+        return PdfObject(EObject.ERROR)
+
+    #---------------------------------------------------------------------------
     # next_object
     #---------------------------------------------------------------------------
  
@@ -478,8 +504,6 @@ class ObjectStream:
                 if tok3.type == EToken.OBJECT_BEGIN:
                     # Start creating the object with the object number (from
                     # tok) and generation number (from tok2)
-                    # self.tk.next_token()  # peeked tok2
-                    # self.tk.next_token()  # peeked tok3
                     # Get the defined (internal) object
                     self.tok = tok3
                     obj = self.get_indirect_obj_def()

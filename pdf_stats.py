@@ -159,12 +159,23 @@ def get_file_data(filepath):
     
     with open(filepath, 'rb') as f:
         ob = ObjectStream(filepath, f)
+
+        # PDF Spec, § 7.5.8 Cross-Reference Streams, page 49:
+        
+        # Beginning with PDF 1.5, cross-reference information may be stored in
+        # a cross-reference stream instead of in a cross-reference table.
+        # Cross-reference streams are stream objects (see 7.3.8, "Stream
+        # Objects"), and contain a dictionary and a data stream.
+        
+        # The value following the startxref keyword shall be the offset of the
+        # cross-reference stream rather than the xref keyword.
+
         ob.seek(offset)
         o = ob.get_xref_section()
         xref_sec = o.data
 
         # # Print out the cross reference table
-        o.show()
+        print(o.show())
         # print(xref_sec)
         
         # What comes after the cross reference section ?
@@ -194,22 +205,22 @@ def get_file_data(filepath):
             # print(f'Accessing Root element in "{filepath}"')
             root = ob.deref_object(o.data['Root'])
 
-            if root:
-                # d is a python dictionary, but the items are PdfObjects
-                d = root.data
-                print(f"Catalog dictionary: {filepath.split(';')[0]}")
-                for k, v in d.items():
-                    print(f'    {k}: {v}')
+            # if root:
+            #     # d is a python dictionary, but the items are PdfObjects
+            #     d = root.data
+            #     print(f"Catalog dictionary: {filepath.split(';')[0]}")
+            #     for k, v in d.items():
+            #         print(f'    {k}: {v.show()}')
 
-            # Next we're interested in the Info dictionary
-            info = ob.deref_object(o.data['Info'])
+            # # Next we're interested in the Info dictionary
+            # info = ob.deref_object(o.data['Info'])
 
-            if info:
-                # d is a python dictionary, but the items are PdfObjects
-                d = info.data
-                print(f"Information dictionary: {filepath.split(';')[0]}")
-                for k, v in d.items():
-                    print(f'    {k}: {v}')
+            # if info:
+            #     # d is a python dictionary, but the items are PdfObjects
+            #     d = info.data
+            #     print(f"Information dictionary: {filepath.split(';')[0]}")
+            #     for k, v in d.items():
+            #         print(f'    {k}: {v.show()}')
 
         return len(xref_sec.sub_sections), trailer_follows
         
@@ -260,7 +271,9 @@ def stats_dir_to_csv(path):
 #-------------------------------------------------------------------------------
             
 if __name__ == '__main__':
-
+    # Force stdout to use utf-8
+    sys.stdout.reconfigure(encoding='utf-8')
+    
     # Check cmd line arguments
     if len(sys.argv) == 2:
         filepath = sys.argv[1]
