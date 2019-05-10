@@ -28,11 +28,11 @@ sys.stdout = Unbuffered(sys.stdout)
 class ByteStreamTest(unittest.TestCase):
     """Test the parsing of binary files."""
 
-    path = r'D:\joao\src\py\pdf\t'
+    path = 't'
 
     def test01(self):
         """Test simple next_byte() calls, up to and across the block boundary."""
-        filepath = os.path.join(ByteStreamTest.path, 'sample.dat')
+        filepath = r't\sample.dat'
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
         
@@ -57,7 +57,7 @@ class ByteStreamTest(unittest.TestCase):
 
     def test02(self):
         """Test next_byte(3) calls, up to and across the block boundary."""
-        filepath = os.path.join(ByteStreamTest.path, 'sample.dat')
+        filepath = r't\sample.dat'
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
         
@@ -74,7 +74,7 @@ class ByteStreamTest(unittest.TestCase):
 
     def test03(self):
         """Read some characters, seek back, read again.."""
-        filepath = os.path.join(ByteStreamTest.path, 'sample.dat')
+        filepath = r't\sample.dat'
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
@@ -88,7 +88,7 @@ class ByteStreamTest(unittest.TestCase):
 
     def test04(self):
         """Read some characters, seek back, read again.."""
-        filepath = os.path.join(ByteStreamTest.path, 'sample.dat')
+        filepath = r't\sample.dat'
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
@@ -110,7 +110,7 @@ class ByteStreamTest(unittest.TestCase):
          
     def test05(self):
         """Read some characters, seek back, read again.."""
-        filepath = os.path.join(ByteStreamTest.path, 'sample.dat')
+        filepath = r't\sample.dat'
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
@@ -120,7 +120,7 @@ class ByteStreamTest(unittest.TestCase):
          
     def test06(self):
         """Read some characters, use tell(), seek back, read again.."""
-        filepath = os.path.join(ByteStreamTest.path, 'sample.dat')
+        filepath = r't\sample.dat'
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
@@ -150,13 +150,11 @@ class ByteStreamTest(unittest.TestCase):
          
     def test07(self):
         """Memorize starting position, read, go back."""
-        filepath = os.path.join(ByteStreamTest.path, 'sample.dat')
+        filepath = r't\sample.dat'
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
 
             pos = bf.tell()
-            print()
-            print(f'test07: tell: pos={pos} (should be 0)')
             
             s = bf.next_byte(4)
             self.assertEqual(b'0123', s)
@@ -166,7 +164,6 @@ class ByteStreamTest(unittest.TestCase):
             self.assertEqual(b'9abcde', s)
 
             pos2 = bf.tell()
-            print(f'test07: tell: pos2={pos2} (should be 15)')
 
             bf.seek(pos)  # Move back to 0
             
@@ -184,7 +181,7 @@ class ByteStreamTest(unittest.TestCase):
          
     def test08(self):
         """Same as test07, but get some bytes before the first tell()"""
-        filepath = os.path.join(ByteStreamTest.path, 'sample.dat')
+        filepath = r't\sample.dat'
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
             
@@ -192,8 +189,6 @@ class ByteStreamTest(unittest.TestCase):
             self.assertEqual(b'012', s)
 
             pos = bf.tell()
-            print()
-            print(f'test08: tell: pos={pos} (should be 3)')
             
             s = bf.next_byte(5)
             self.assertEqual(b'34567', s)
@@ -201,7 +196,6 @@ class ByteStreamTest(unittest.TestCase):
             self.assertEqual(b'89ab', s)
 
             pos2 = bf.tell()
-            print(f'test08: tell: pos2={pos2} (should be 12)')
 
             bf.seek(pos)  # Move back to 3
             
@@ -219,7 +213,7 @@ class ByteStreamTest(unittest.TestCase):
          
     def test09(self):
         """File holds several blocks"""
-        filepath = os.path.join(ByteStreamTest.path, 'blocks.dat')
+        filepath = r't\blocks.dat'
         with open(filepath, 'rb') as f:
             bf = byte_stream.ByteStream(filepath, f, blk_sz=16)
             
@@ -227,8 +221,6 @@ class ByteStreamTest(unittest.TestCase):
             self.assertEqual(b'abc', s)
 
             pos = bf.tell()
-            print()
-            print(f'test09: tell: pos={pos} (should be 3), s_pos={bf.s_pos}')
             
             s = bf.next_byte(65)
             self.assertEqual(b'fgh', s[62:])
@@ -236,16 +228,13 @@ class ByteStreamTest(unittest.TestCase):
             self.assertEqual(b'ij01', s)
             
             pos2 = bf.tell()
-            print(f'test09: tell: pos2={pos2} (should be 72), s_pos={bf.s_pos}')
 
             bf.seek(pos)  # Move back to 3
-            print(f'test09: seek: s_pos={bf.s_pos} (should be 3)')
 
             s = bf.next_byte(5)
             self.assertEqual(b'defgh', s)
             
             bf.seek(pos2)  # Move forward to 72
-            print(f'test09: seek: s_pos={bf.s_pos} (should be 72)')
 
             s = bf.next_byte(3)
             self.assertEqual(b'234', s)

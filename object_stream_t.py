@@ -28,7 +28,7 @@ sys.stdout = Unbuffered(sys.stdout)
 class ObjectStreamTest(unittest.TestCase):
     """Test the parsing of pdf objects in pdf files."""
 
-    path = r'D:\joao\src\py\pdf\t'
+    path = 't'
 
     def test01(self):
         """Test simplest array."""
@@ -40,7 +40,7 @@ class ObjectStreamTest(unittest.TestCase):
             obj = ob.next_object()
             self.assertEqual(EObject.ARRAY, obj.type)
             arr = obj.data
-            self.assertEqual(2, len(arr))
+            self.assertEqual(3, len(arr))
             o = arr[0]
             self.assertEqual(EObject.INTEGER, o.type)
             self.assertEqual(17, o.data)
@@ -235,7 +235,7 @@ class ObjectStreamTest(unittest.TestCase):
 
     def test07(self):
         """Test dictionary objects in dict1.dat."""
-        filepath = os.path.join(ObjectStreamTest.path, 'dict1.dat')
+        filepath = r't\dict1.dat'
         with open(filepath, 'rb') as f:
             ob = ObjectStream(filepath, f)
 
@@ -316,7 +316,7 @@ class ObjectStreamTest(unittest.TestCase):
 
     def test08(self):
         """Test dictionary objects in dict2.dat"""
-        filepath = os.path.join(ObjectStreamTest.path, 'dict2.dat')
+        filepath = r't\dict2.dat'
         with open(filepath, 'rb') as f:
             ob = ObjectStream(filepath, f)
 
