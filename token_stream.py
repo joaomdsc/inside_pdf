@@ -90,10 +90,10 @@ Tokens are separated from each other by whitespace and/or delimiter characters.
         elif self.type == EToken.INTEGER or self.type == EToken.REAL:
             s += str(self.data)
         elif self.type == EToken.LITERAL_STRING or self.type == EToken.HEX_STRING:
-            s += self.data[:len(self.data)].decode('unicode_escape')
+            s += self.data.hex()
         elif self.type == EToken.NAME:
             # FIXME non ascii bytes may be found in here
-            s += self.data.decode()
+            s += self.data.decode("unicode_escape")
         elif self.type == EToken.ERROR:
             s += self.data
         s += ')'
@@ -169,28 +169,21 @@ class TokenStream:
                 cc2 = self.bf.next_byte()
                 if cc2 == ord('n'):
                     ls.append(ord('\n'))
-                    self.bf.next_byte()
                 elif cc2 == ord('r'):
                     ls.append(ord('\r'))
-                    self.bf.next_byte()
                 elif cc2 == ord('t'):
                     ls.append(ord('\t'))
                     self.bf.next_byte()
                 elif cc2 == ord('b'):
                     ls.append(ord('\b'))
-                    self.bf.next_byte()
                 elif cc2 == ord('f'):
                     ls.append(ord('\f'))
-                    self.bf.next_byte()
                 elif cc2 == ord('('):
                     ls.append(ord('('))
-                    self.bf.next_byte()
                 elif cc2 == ord(')'):
                     ls.append(ord(')'))
-                    self.bf.next_byte()
                 elif cc2 == ord('\\'):
                     ls.append(ord('\\'))
-                    self.bf.next_byte()
                 else:
                     # next_byte may fail if there are less than 3 characters in
                     # the stream. In that case, the backslash should be
@@ -200,7 +193,6 @@ class TokenStream:
                     try:
                         c = int(s, 8)
                         ls.append(c)
-                        self.bf.next_byte(3)
                     except ValueError as e:
                         # Backslash was not followed by one of the expected
                         # characters, just ignore it. The character following

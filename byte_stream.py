@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 # byte_stream.py - read a stream of bytes from a binary file
 
+# Is this module useless?  I coded this to have read, tell, and seek when
+# reading blocks of text at once.  Isn't this offered by the base modules?
+# I should perform a comparison against the base modules.
+
 import io
 import os
 import sys

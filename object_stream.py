@@ -76,8 +76,10 @@ class PdfObject():
             s += f"{self.data['objn']} {self.data['gen']} R"
         elif self.type == EObject.ARRAY:
             s += '['
-            for x in self.data:
+            for i, x in enumerate(self.data):
                 s += f'{x}, '
+                if i > 20:
+                    break
             s += ']'
         elif self.type == EObject.DICTIONARY:
             s += '{'
@@ -102,7 +104,8 @@ class PdfObject():
         if self.type in [EObject.BOOLEAN, EObject.INTEGER, EObject.REAL]:
             return f'{self.data}'
         if self.type == EObject.STRING:
-            return f'"{self.data[:len(self.data)].decode("unicode_escape")}"'
+            # return f'{self.data.hex()}'
+            return f'{self.data.decode("unicode_escape")}'
         if self.type == EObject.NAME:
             return f'/{self.data[:len(self.data)].decode("unicode_escape")}'
         if self.type == EObject.IND_OBJ_REF:
@@ -113,14 +116,14 @@ class PdfObject():
             s += f'{self.data}'
         elif self.type == EObject.ARRAY:
             s += '['
-            s += ', '.join([x.show() for x in self.data])
+            s += ', '.join([x.show() for x in self.data[:min(20, len(self.data))]])
             s += ']'
         elif self.type == EObject.DICTIONARY:
             # Dictionary key has been decoded for insertion
             s += ', '.join([f"(/{k}, {v.show()})"
                             for k, v in self.data.items()])
         elif self.type == EObject.STREAM:
-            s += self.data[:10].decode('unicode_escape') + '...'
+            s += self.data[:20].hex() + '...'
         elif self.type == EObject.IND_OBJ_DEF:
             o = self.data['obj']  # PdfObject
             s += f"{self.data['objn']} {self.data['gen']} "
@@ -302,6 +305,7 @@ class ObjectStream:
         tok = self.tk.next_token()
         while True:
             if tok.type == EToken.DICT_END:
+                self.tok = tok
                 # It's a python dictionary, but the values are PdfObjects
                 return PdfObject(EObject.DICTIONARY, d)
             if tok.type == EToken.ERROR:
@@ -328,7 +332,9 @@ class ObjectStream:
     #---------------------------------------------------------------------------
     # get_stream
     #---------------------------------------------------------------------------
- 
+
+    # FIXME define a proper stream class, with the dictionary in it
+    
     def get_stream(self, length):
         """Found the opening STREAM_BEGIN token, now get all the data."""
         # self.tok has an EToken.STREAM_BEGIN, parse the following tokens.
@@ -373,6 +379,33 @@ class ObjectStream:
 
         # Return the stream data object, with the closing _END token 
         return PdfObject(EObject.STREAM, data=s)
+      
+    #---------------------------------------------------------------------------
+    # deflate_stream
+    #---------------------------------------------------------------------------
+ 
+    def deflate_stream(self, s, predictor=None, W=None):
+        """Decode stream s, encoded with flate, with predictor and W params."""
+        # s: original compressed data stream (stripped)
+        # predictor: integer with values in { 1, 2, 10-15 }
+        # W: python array of integers
+
+        # First, deflate the string
+        zd = zlib.decompress(s)
+        if not predictor:
+            # No DecodeParms...
+            return(zd)
+
+        # From https://forums.adobe.com/thread/664902: "Strip off the last 10
+        # characters of the string. This is the CRC and is unnecessary to
+        # extract the raw data". Not doing this, at this point.
+
+        # Sum up the column widths. For the example above [1 2 1] would be
+        # 4. This is one less than the number of bytes in each row.
+        n = sum(W)
+
+        # Split the string into rows by the column width: sum+1, or in our
+        # example, 5.
 
     #---------------------------------------------------------------------------
     # get_xref_section
@@ -434,8 +467,9 @@ class ObjectStream:
         # (for a traditional cross_reference table) or an INTEGER, introducing
         # an indirect object definition, for a cross-reference stream
         # (available in PDF 1.5 and later)
+        tok = self.tok
 
-        if self.tok.type == EToken.EOF:
+        if tok.type == EToken.EOF:
             return PdfObject(EObject.EOF)
 
         # Traditional
@@ -558,21 +592,25 @@ class ObjectStream:
                 return obj
             while True:
                 self.tok = self.tk.next_token()
-                if self.tok not in [EToken.CR, EToken.LF, EToken.CRLF]:
+                if self.tok.type not in [EToken.CR, EToken.LF, EToken.CRLF]:
                     break
             if self.tok.type != EToken.STREAM_BEGIN:
                 return obj  # return the dict
 
-            # We have found a STREAM_BEGIN token, the 'obj' dict has the Length
+            # We have found a STREAM_BEGIN token, so 'obj' is the stream
+            # dictionary
+            
+            # FIXME this may not be right. Length is given as an indirect
+            # object ref, we must have parsed all the xref tables at this point
+            # if we want to parse this stream.
             o = obj.data['Length']
-            # FIXME this is not right, CNIL-PIA-3-BonnesPratiques.pdf does not
-            # parse correctly. Length is given as an indirect object ref.
             if o.type == EObject.INTEGER:
                 ln = o.data
             elif o.type == EObject.IND_OBJ_REF:
                 ln = self.deref_object(o)
             else:
                 return PdfObject(EObject.ERROR)
+            
             obj2 = self.get_stream(ln)
             # FIXME use exceptions instead
             if obj2.type in [EObject.ERROR, EObject.EOF]:
@@ -600,7 +638,7 @@ class ObjectStream:
                 return PdfObject(EObject.ERROR)
             obj = self.get_dictionary()
             self.tok = self.tk.next_token()
-            return PdfObject(EObject.TRAILER, obj)
+            return PdfObject(EObject.TRAILER, data=obj)
 
         elif tok.type == EToken.STARTXREF:
             self.tok = self.tk.next_token()

@@ -54,22 +54,14 @@ def parse_tokens(filepath):
 #-------------------------------------------------------------------------------
 
 def parse_objects(filepath):
-    # Array for object storage 
-    objects = []
-
     # Parse a character stream into a object stream
     with open(filepath, 'rb') as f:
         ob = ObjectStream(filepath, f)
-        print('====================')
         while True:
             o = ob.next_object()
             if o.type == EObject.EOF:
                 break
-            print(o)
-            print('--------------------')
             print(o.show())
-            print('====================')
-            objects.append(o)
 
 #-------------------------------------------------------------------------------
 # main

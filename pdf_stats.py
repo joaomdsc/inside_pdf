@@ -4,6 +4,7 @@
 import os
 import re
 import sys
+import zlib
 from file_read_backwards import FileReadBackwards
 from object_stream import EObject, XrefSection, ObjectStream
 
@@ -14,17 +15,33 @@ bEOL = b'(\r\n|\r|\n)'
 # I want stdout to be unbuffered, always
 #-------------------------------------------------------------------------------
 
-class Unbuffered(object):
-    def __init__(self, stream):
-        self.stream = stream
-    def write(self, data):
-        self.stream.write(data)
-        self.stream.flush()
-    def __getattr__(self, attr):
-        return getattr(self.stream, attr)
+# class Unbuffered(object):
+#     def __init__(self, stream):
+#         self.stream = stream
+#     def write(self, data):
+#         self.stream.write(data)
+#         self.stream.flush()
+#     def __getattr__(self, attr):
+#         return getattr(self.stream, attr)
+
+# import sys
+# sys.stdout = Unbuffered(sys.stdout)
+
+#-------------------------------------------------------------------------------
+# Printing LF and not CRLF on stdout on Windows 
+#-------------------------------------------------------------------------------
 
 import sys
-sys.stdout = Unbuffered(sys.stdout)
+sys.stdout = open(sys.__stdout__.fileno(), 
+              mode=sys.__stdout__.mode, 
+              buffering=1, 
+              encoding=sys.__stdout__.encoding, 
+              errors=sys.__stdout__.errors, 
+              newline='\n', 
+              closefd=False)
+
+# Force utf-8 output
+sys.stdout.reconfigure(encoding='utf-8')
                 
 #-------------------------------------------------------------------------------
 # get_eol
@@ -171,8 +188,37 @@ def get_file_data(filepath):
         # cross-reference stream rather than the xref keyword.
 
         ob.seek(offset)
-        o = ob.get_xref_section()
-        xref_sec = o.data
+        o = ob.get_cross_reference()
+        if o.type == EObject.XREF_SECTION:
+            print('traditional')
+            xref_sec = o.data
+        elif o.type == EObject.IND_OBJ_DEF:
+            # o.data is a dictionary {'obj': xxx, 'objn': n, 'gen': m}
+            print('modern')
+            o = o.data['obj']  # COUPLE
+            
+            # Show stream dictionary
+            print(o.data[0].show())
+            d = o.data[0].data
+            if 'DecodeParms' in d:
+                print("Decode params present, decoding anyway")
+                # return 0, False
+                
+            # W key holds an array of PdfObject INTEGER elements
+            a = [x.data for x in d['W'].data]
+            n = sum(a)
+            sz = d['Size'].data
+            print(f"Size={sz}, n={n}, total={sz*n}")
+            
+            # Show decoded stream
+            s = o.data[1].data
+            print(f'Compressed data stream length = {len(s)}'
+                  + f", /Length={d['Length'].data}")
+            zd = zlib.decompress(s)
+            print(f'Uncompressed data stream length = {len(zd)}')
+            # print(zd)
+            return 0, False
+            # sys.exit()
 
         # # Print out the cross reference table
         print(o.show())
@@ -183,6 +229,7 @@ def get_file_data(filepath):
         o = ob.next_object()
         if o.type == EObject.TRAILER:
             # Trailer immediately follows xref
+            print(o.show())
             trailer_follows = True
 
             # Now get the trailer dictionary
@@ -200,27 +247,29 @@ def get_file_data(filepath):
             # prev_objn = prev.data['objn']
             # prev_gen = prev.data['gen']
 
-            # What we're really interested in, is the catalog dictionary for
-            # the PDF document, which is in the Root key
-            # print(f'Accessing Root element in "{filepath}"')
+            # The Root key holds the catalog dictionary for the PDF
+            # document. It's a required key, and it's an indirect reference.
             root = ob.deref_object(o.data['Root'])
 
-            # if root:
-            #     # d is a python dictionary, but the items are PdfObjects
-            #     d = root.data
-            #     print(f"Catalog dictionary: {filepath.split(';')[0]}")
-            #     for k, v in d.items():
-            #         print(f'    {k}: {v.show()}')
+            if root:
+                # d is a python dictionary, but the items are PdfObjects
+                d = root.data
+                print(f"Catalog dictionary: {filepath.split(';')[0]}")
+                for k, v in d.items():
+                    print(f'    {k}: {v.show()}')
+            else:
+                print(f'Root is an indirect reference, not founf in xref table')
 
-            # # Next we're interested in the Info dictionary
-            # info = ob.deref_object(o.data['Info'])
+            # The Info key, if present, holds the information dictionary.
+            if 'Info' in o.data:
+                info = ob.deref_object(o.data['Info'])
 
-            # if info:
-            #     # d is a python dictionary, but the items are PdfObjects
-            #     d = info.data
-            #     print(f"Information dictionary: {filepath.split(';')[0]}")
-            #     for k, v in d.items():
-            #         print(f'    {k}: {v.show()}')
+                if info:
+                    # d is a python dictionary, but the items are PdfObjects
+                    d = info.data
+                    print(f"Information dictionary: {filepath.split(';')[0]}")
+                    for k, v in d.items():
+                        print(f'    {k}: {v.show()}')
 
         return len(xref_sec.sub_sections), trailer_follows
         
@@ -271,9 +320,6 @@ def stats_dir_to_csv(path):
 #-------------------------------------------------------------------------------
             
 if __name__ == '__main__':
-    # Force stdout to use utf-8
-    sys.stdout.reconfigure(encoding='utf-8')
-    
     # Check cmd line arguments
     if len(sys.argv) == 2:
         filepath = sys.argv[1]

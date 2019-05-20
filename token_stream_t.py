@@ -286,7 +286,43 @@ class TokenStreamTest(unittest.TestCase):
 
             tok = tk.next_token()
             self.assertEqual(EToken.OBJ_REF, tok.type)
-            
+
+    def test05(self):
+        """Test error from flex & bison book."""
+        filepath = os.path.join(TokenStreamTest.path, 'flex0.dat')
+        with open(filepath, 'rb') as f:
+            tk = TokenStream(filepath, f)
+
+            tok = tk.next_token()
+            self.assertEqual(EToken.LITERAL_STRING, tok.type)
+            s = tok.data.decode('unicode_escape')
+            self.assertEqual('Antenna', s[:7])
+
+    # def test06(self):
+    #     """Test error from flex & bison book."""
+    #     filepath = os.path.join(TokenStreamTest.path, 'flex1.dat')
+    #     with open(filepath, 'rb') as f:
+    #         tk = TokenStream(filepath, f)
+
+    #         while True:
+    #             tok = tk.next_token()
+    #             print(tok)
+    #             if tok.type == EToken.EOF:
+    #                 self.assertEqual(0, 0)
+    #         self.assertEqual(1, 0)
+
+    def test_literal(self):
+        """Test literal strings."""
+        filepath = os.path.join(TokenStreamTest.path, 'literal.dat')
+        with open(filepath, 'rb') as f:
+            tk = TokenStream(filepath, f)
+
+            tok = tk.next_token()
+            self.assertEqual(EToken.LITERAL_STRING, tok.type)
+            b = tok.data
+            self.assertEqual(17, len(b))
+            self.assertEqual('This', b[1:5])
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
