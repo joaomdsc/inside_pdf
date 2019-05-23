@@ -4,7 +4,6 @@
 import os
 import re
 import sys
-import zlib
 from file_read_backwards import FileReadBackwards
 from object_stream import EObject, XrefSection, ObjectStream
 
@@ -196,29 +195,68 @@ def get_file_data(filepath):
             # o.data is a dictionary {'obj': xxx, 'objn': n, 'gen': m}
             print('modern')
             o = o.data['obj']  # COUPLE
-            
-            # Show stream dictionary
+
+            # The values of all entries [in the stream dictionary] shall be
+            # direct objects; indirect references shall not be permitted. For
+            # arrays (the Index and W entries), all of their elements shall be
+            # direct objects as well. If the stream is encoded, the Filter and
+            # DecodeParms entries in Table 5 shall also be direct objects.
+
+            # Stream dictionary: all entries are direct objects
             print(o.data[0].show())
             d = o.data[0].data
-            if 'DecodeParms' in d:
-                print("Decode params present, decoding anyway")
-                # return 0, False
-                
-            # W key holds an array of PdfObject INTEGER elements
-            a = [x.data for x in d['W'].data]
-            n = sum(a)
+
+            # Size is required
             sz = d['Size'].data
-            print(f"Size={sz}, n={n}, total={sz*n}")
+
+            # Index is optional, defaults to [0, sz]
+            # FIXME there could be several subsections ?
+            if 'Index' in d:
+                arr = d['Index'].data
+                if len(arr) > 2:
+                    print('FIXME: more than one cross-reference table subsection')
+                first_objn = arr[0]
+                entry_cnt = arr[1]
+            else:
+                first_objn = 0
+                entry_cnt = sz
+
+            # Decoding parameters
+            columns = None
+            predictor = None
+            if 'DecodeParms' in d:
+                print("Decode params present:")
+                dp = d['DecodeParms'].data
+                if 'Columns' in dp:
+                    columns = dp['Columns'].data
+                if 'Predictor' in dp:
+                    predictor = dp['Predictor'].data
+            print(f'    columns={columns}\n    predictor={predictor}')
+                    
+            # W key holds an array of PdfObject INTEGER elements
+            w = [x.data for x in d['W'].data]
             
             # Show decoded stream
             s = o.data[1].data
             print(f'Compressed data stream length = {len(s)}'
                   + f", /Length={d['Length'].data}")
-            zd = zlib.decompress(s)
-            print(f'Uncompressed data stream length = {len(zd)}')
-            # print(zd)
+            p, x = ob.deflate_stream(s, columns, predictor, w)
+            if p:
+                xref_sec = XrefSection()
+                arr = x
+                # This a cross-reference sub-section
+                subs = XrefSubSection(first_objn, entry_cnt)
+                for t in arr:
+                    # FIXME there are type 2 entries
+                    subs.entries.append(t)
+                # FIXME more than one subsection ?
+                xref_sec.sub_sections.append(subs)
+                return 1, False
+            else:
+                zd = x
+                print(f'Uncompressed data stream length = {len(zd)}')
+                # print(zd)
             return 0, False
-            # sys.exit()
 
         # # Print out the cross reference table
         print(o.show())
@@ -258,7 +296,7 @@ def get_file_data(filepath):
                 for k, v in d.items():
                     print(f'    {k}: {v.show()}')
             else:
-                print(f'Root is an indirect reference, not founf in xref table')
+                print(f'Root is an indirect reference, not found in xref table')
 
             # The Info key, if present, holds the information dictionary.
             if 'Info' in o.data:

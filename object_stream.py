@@ -4,6 +4,7 @@
 import os
 import re
 import sys
+import zlib
 from enum import Enum, auto, unique
 from token_stream import EToken, TokenStream
 
@@ -384,17 +385,23 @@ class ObjectStream:
     # deflate_stream
     #---------------------------------------------------------------------------
  
-    def deflate_stream(self, s, predictor=None, W=None):
+    def deflate_stream(self, s, columns=None, predictor=None, W=None):
         """Decode stream s, encoded with flate, with predictor and W params."""
         # s: original compressed data stream (stripped)
+        # collumns: integer
         # predictor: integer with values in { 1, 2, 10-15 }
         # W: python array of integers
 
         # First, deflate the string
         zd = zlib.decompress(s)
         if not predictor:
-            # No DecodeParms...
-            return(zd)
+            # No DecodeParms, so we assume no predictor
+            # False means we have not done the un-predicting, just return zd
+            return False, zd
+
+        if predictor != 12:
+            print(f'Predictor value {predictor} not supported (currently only 12)')
+            return False, zd
 
         # From https://forums.adobe.com/thread/664902: "Strip off the last 10
         # characters of the string. This is the CRC and is unnecessary to
@@ -402,10 +409,51 @@ class ObjectStream:
 
         # Sum up the column widths. For the example above [1 2 1] would be
         # 4. This is one less than the number of bytes in each row.
-        n = sum(W)
+        n = sum(W)  # n == 4
+        width = n+1
 
         # Split the string into rows by the column width: sum+1, or in our
         # example, 5.
+
+        # Is the uncompressed stream length a multiple of this width ?
+        if len(zd)%(width) == 0:
+            print(f'*** Uncompressed len(zd)={len(zd)}, width={width}'
+                  + f', {len(zd)}={len(zd)//(width)}*{width}')
+        else:
+            print(f'*** Uncompressed len(zd)={len(zd)}, width={width}'
+                  + ', not a multiple')
+
+        # zd is a bytes object
+        prev = [0]*width
+        nrows = len(zd)//(width)  # 86
+        arr = []
+        for r in range(nrows):  # 0..85
+            bs = ''
+            rowdata = [x for x in zd[r*width:(r+1)*width]]  # array of ints
+            for i in range(1, width):
+                rowdata[i] = (rowdata[i] + prev[i]) % 256
+                bs += format(rowdata[i], '08b')  # Convert to binary string
+            prev = rowdata  # Update prev for next pass
+            # Split the string according to W
+            # print(f'{bs} len={len(bs)}')
+
+            begin = 0
+            end = 8*W[0]
+            type = int(bs[begin:end], 2)
+
+            begin = 8*W[0]
+            end = 8*(W[0] + W[1])
+            fld1 = int(bs[begin:end], 2)
+
+            begin = 8*(W[0] + W[1])
+            end = begin + 8*W[2]
+            fld2 = int(bs[begin:end], 2)
+            
+            arr.append((type, fld1, fld2))
+
+        # True means we have done the un-predicting, so what we return is an
+        # array of 3-uples"
+        return True, arr
 
     #---------------------------------------------------------------------------
     # get_xref_section
